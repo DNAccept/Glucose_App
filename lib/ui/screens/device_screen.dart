@@ -6,8 +6,15 @@ import '../../ble/ble_manager.dart';
 import '../../core/theme.dart';
 import '../../state/ble_providers.dart';
 
-class DeviceScreen extends ConsumerWidget {
+class DeviceScreen extends ConsumerStatefulWidget {
   const DeviceScreen({super.key});
+
+  @override
+  ConsumerState<DeviceScreen> createState() => _DeviceScreenState();
+}
+
+class _DeviceScreenState extends ConsumerState<DeviceScreen> {
+  String? _connectingDeviceId;
 
   Future<void> _ensurePermissions() async {
     await [
@@ -17,11 +24,40 @@ class DeviceScreen extends ConsumerWidget {
     ].request();
   }
 
+  Future<void> _handleConnect(BleManager manager, String deviceId) async {
+    setState(() => _connectingDeviceId = deviceId);
+    try {
+      await manager.connect(deviceId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connected to Glucose Wearable!'),
+            backgroundColor: Color(0xFF2E7D32),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Connection failed: $e'),
+            backgroundColor: const Color(0xFFC62828),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _connectingDeviceId = null);
+    }
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final connection = ref.watch(connectionStateProvider).valueOrNull ?? BleConnectionState.disconnected;
-    final battery = ref.watch(batteryLevelProvider).valueOrNull;
-    final devices = ref.watch(discoveredDevicesProvider).valueOrNull ?? const [];
+  Widget build(BuildContext context) {
+    final connection = ref.watch(connectionStateProvider);
+    final connectedDevice = ref.watch(connectedDeviceProvider);
+    final battery = ref.watch(batteryLevelProvider);
+    final devices = ref.watch(discoveredDevicesProvider);
     final manager = ref.read(bleManagerProvider);
 
     return ListView(
@@ -46,12 +82,12 @@ class DeviceScreen extends ConsumerWidget {
                         child: const Icon(Icons.bluetooth, color: AppColors.accent),
                       ),
                       const SizedBox(width: 12),
-                      const Expanded(
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Glucose Wearable', style: TextStyle(fontWeight: FontWeight.w600)),
-                            Text('Paired over BLE', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                            Text(connectedDevice?.name ?? 'Glucose Wearable', style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text(connectedDevice?.id != null ? 'ID: ${connectedDevice!.id}' : 'Connected over Bluetooth LE', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                           ],
                         ),
                       ),
@@ -65,7 +101,18 @@ class DeviceScreen extends ConsumerWidget {
                       Text('Battery ${battery ?? '--'}%', style: const TextStyle(color: AppColors.muted)),
                       const Spacer(),
                       OutlinedButton(
-                        onPressed: () => manager.disconnect(),
+                        onPressed: () async {
+                          await manager.disconnect();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Disconnected from wearable'),
+                                backgroundColor: Color(0xFF424242),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.accent,
                           side: const BorderSide(color: Color(0xFFCFE0F7)),
@@ -80,6 +127,28 @@ class DeviceScreen extends ConsumerWidget {
             ),
           ),
         ] else ...[
+          if (connection == BleConnectionState.disconnected)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.25)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.bluetooth_disabled, color: Color(0xFFDC2626), size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No wearable connected. Power on your device and scan.',
+                      style: TextStyle(fontSize: 13, color: Color(0xFFDC2626), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -94,7 +163,7 @@ class DeviceScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
-                    onPressed: connection == BleConnectionState.scanning
+                    onPressed: connection == BleConnectionState.scanning || connection == BleConnectionState.connecting
                         ? null
                         : () async {
                             await _ensurePermissions();
@@ -125,24 +194,35 @@ class DeviceScreen extends ConsumerWidget {
               ),
             )
           else
-            ...devices.map((d) => Card(
-                  child: ListTile(
-                    leading: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(color: const Color(0xFFEEF2FB), borderRadius: BorderRadius.circular(19)),
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.watch_outlined, color: AppColors.accent, size: 20),
-                    ),
-                    title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text('${d.rssi} dBm', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                    trailing: FilledButton(
-                      onPressed: () => manager.connect(d.id),
-                      style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
-                      child: const Text('Connect'),
-                    ),
+            ...devices.map((d) {
+              final isConnectingThis = _connectingDeviceId == d.id || (connection == BleConnectionState.connecting && manager.currentDevice?.id == d.id);
+              return Card(
+                child: ListTile(
+                  leading: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(color: const Color(0xFFEEF2FB), borderRadius: BorderRadius.circular(19)),
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.watch_outlined, color: AppColors.accent, size: 20),
                   ),
-                )),
+                  title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(d.rssi != 0 ? '${d.rssi} dBm' : 'Nearby', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  trailing: FilledButton(
+                    onPressed: isConnectingThis || connection == BleConnectionState.connecting
+                        ? null
+                        : () => _handleConnect(manager, d.id),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
+                    child: isConnectingThis
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Connect'),
+                  ),
+                ),
+              );
+            }),
         ],
       ],
     );

@@ -20,9 +20,18 @@ class DiscoveredDevice {
 /// dropped in later) without touching a single screen.
 abstract class BleManager {
   Stream<BleConnectionState> get connectionState;
+  BleConnectionState get currentConnectionState;
+
   Stream<GlucoseReading> get readings;
+
   Stream<int> get batteryLevel;
+  int? get currentBatteryLevel;
+
   Stream<List<DiscoveredDevice>> get discoveredDevices;
+  List<DiscoveredDevice> get currentDiscoveredDevices;
+
+  Stream<DiscoveredDevice?> get connectedDevice;
+  DiscoveredDevice? get currentDevice;
 
   Future<void> startScan();
   Future<void> stopScan();

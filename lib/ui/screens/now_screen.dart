@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../ble/ble_manager.dart';
 import '../../core/theme.dart';
 import '../../state/ble_providers.dart';
+import '../../state/data_providers.dart';
 import '../../state/readings_providers.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/state_ring.dart';
@@ -17,8 +17,8 @@ class NowScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final readingAsync = ref.watch(latestReadingProvider);
-    final connection = ref.watch(connectionStateProvider).valueOrNull ?? BleConnectionState.disconnected;
-    final battery = ref.watch(batteryLevelProvider).valueOrNull;
+    final connection = ref.watch(connectionStateProvider);
+    final battery = ref.watch(batteryLevelProvider);
     final fractions = ref.watch(fractionsProvider(const Duration(hours: 24)));
 
     return ListView(
@@ -38,7 +38,11 @@ class NowScreen extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 12),
-        ConnectionBanner(state: connection, batteryLevel: battery),
+        ConnectionBanner(
+          state: connection,
+          batteryLevel: battery,
+          onTap: () => ref.read(activeTabProvider.notifier).state = 2,
+        ),
         const SizedBox(height: 8),
         readingAsync.when(
           data: (r) => StateRing(reading: r),

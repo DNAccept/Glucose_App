@@ -35,3 +35,6 @@ final notificationServiceProvider = Provider<NotificationService>((ref) {
   service.init();
   return service;
 });
+
+final activeTabProvider = StateProvider<int>((ref) => 0);
+

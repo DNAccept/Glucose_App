@@ -1,45 +1,91 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_manager.dart';
-import '../ble/simulated_ble_manager.dart';
 import '../ble/real_ble_manager.dart';
-import '../core/glucose_class.dart';
 
-/// Whether the app is talking to the bundled simulator instead of real
-/// hardware. Defaults to the simulator in debug builds (no firmware exists
-/// yet) and to the real BLE manager in release builds.
-final useSimulatorProvider = StateProvider<bool>((ref) => kDebugMode);
-
+/// Active BLE Manager wired directly to physical Bluetooth hardware.
 final bleManagerProvider = Provider<BleManager>((ref) {
-  final useSimulator = ref.watch(useSimulatorProvider);
-  final manager = useSimulator ? SimulatedBleManager() : RealBleManager();
-  ref.onDispose(() => manager.dispose());
-  return manager;
+  final real = RealBleManager();
+  ref.onDispose(() => real.dispose());
+  return real;
 });
 
-final connectionStateProvider = StreamProvider<BleConnectionState>((ref) {
-  return ref.watch(bleManagerProvider).connectionState;
-});
-
-final batteryLevelProvider = StreamProvider<int>((ref) {
-  return ref.watch(bleManagerProvider).batteryLevel;
-});
-
-final discoveredDevicesProvider = StreamProvider<List<DiscoveredDevice>>((ref) {
-  return ref.watch(bleManagerProvider).discoveredDevices;
-});
-
-/// Demo-only control (see [SimulatedBleManager.forceClass]) surfaced behind
-/// a debug-build toggle in Settings.
-final forcedClassProvider = StateProvider<GlucoseClass?>((ref) => null);
-
-/// Applies [forcedClassProvider] to the active manager when it's the
-/// simulator. Kept alive by being watched once from [RootShell].
-final forceClassEffectProvider = Provider<void>((ref) {
-  final manager = ref.watch(bleManagerProvider);
-  final forced = ref.watch(forcedClassProvider);
-  if (manager is SimulatedBleManager) {
-    manager.forceClass(forced);
+class ConnectionStateNotifier extends StateNotifier<BleConnectionState> {
+  ConnectionStateNotifier(this._manager) : super(_manager.currentConnectionState) {
+    _sub = _manager.connectionState.listen((s) => state = s);
   }
+
+  final BleManager _manager;
+  late final StreamSubscription<BleConnectionState> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final connectionStateProvider = StateNotifierProvider<ConnectionStateNotifier, BleConnectionState>((ref) {
+  return ConnectionStateNotifier(ref.watch(bleManagerProvider));
 });
+
+class BatteryLevelNotifier extends StateNotifier<int?> {
+  BatteryLevelNotifier(this._manager) : super(_manager.currentBatteryLevel) {
+    _sub = _manager.batteryLevel.listen((b) => state = b);
+  }
+
+  final BleManager _manager;
+  late final StreamSubscription<int> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final batteryLevelProvider = StateNotifierProvider<BatteryLevelNotifier, int?>((ref) {
+  return BatteryLevelNotifier(ref.watch(bleManagerProvider));
+});
+
+class DiscoveredDevicesNotifier extends StateNotifier<List<DiscoveredDevice>> {
+  DiscoveredDevicesNotifier(this._manager) : super(_manager.currentDiscoveredDevices) {
+    _sub = _manager.discoveredDevices.listen((d) => state = d);
+  }
+
+  final BleManager _manager;
+  late final StreamSubscription<List<DiscoveredDevice>> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final discoveredDevicesProvider = StateNotifierProvider<DiscoveredDevicesNotifier, List<DiscoveredDevice>>((ref) {
+  return DiscoveredDevicesNotifier(ref.watch(bleManagerProvider));
+});
+
+class ConnectedDeviceNotifier extends StateNotifier<DiscoveredDevice?> {
+  ConnectedDeviceNotifier(this._manager) : super(_manager.currentDevice) {
+    _sub = _manager.connectedDevice.listen((d) => state = d);
+  }
+
+  final BleManager _manager;
+  late final StreamSubscription<DiscoveredDevice?> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final connectedDeviceProvider = StateNotifierProvider<ConnectedDeviceNotifier, DiscoveredDevice?>((ref) {
+  return ConnectedDeviceNotifier(ref.watch(bleManagerProvider));
+});
+
+

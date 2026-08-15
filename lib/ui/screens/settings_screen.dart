@@ -1,11 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/glucose_class.dart';
 import '../../core/theme.dart';
 import '../../state/auth_providers.dart';
-import '../../state/ble_providers.dart';
 import '../../state/settings_providers.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -15,8 +12,6 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final alertsEnabled = ref.watch(alertsEnabledProvider);
     final cloudEnabled = ref.watch(cloudSyncEnabledProvider);
-    final useSimulator = ref.watch(useSimulatorProvider);
-    final forcedClass = ref.watch(forcedClassProvider);
     final currentUser = ref.watch(authControllerProvider).valueOrNull;
 
     return ListView(
@@ -73,8 +68,8 @@ class SettingsScreen extends ConsumerWidget {
                     onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Cloud sync is not implemented in this build.')),
                     ),
-                    icon: const Icon(Icons.cloud_outlined),
-                    label: const Text('Sign in to sync'),
+                    icon: const Icon(Icons.cloud_upload_outlined),
+                    label: const Text('Sync now'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.accent,
                       minimumSize: const Size.fromHeight(46),
@@ -85,48 +80,6 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        if (kDebugMode) ...[
-          const SizedBox(height: 14),
-          const _SectionLabel('Developer'),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Use BLE simulator'),
-                    subtitle: const Text('No real wearable connected — feed synthetic data instead'),
-                    value: useSimulator,
-                    onChanged: (v) => ref.read(useSimulatorProvider.notifier).state = v,
-                  ),
-                  if (useSimulator) ...[
-                    const SizedBox(height: 4),
-                    const Text('Force class', style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Auto'),
-                          selected: forcedClass == null,
-                          onSelected: (_) => ref.read(forcedClassProvider.notifier).state = null,
-                        ),
-                        for (final c in GlucoseClass.values)
-                          ChoiceChip(
-                            label: Text(c.label),
-                            selected: forcedClass == c,
-                            onSelected: (_) => ref.read(forcedClassProvider.notifier).state = c,
-                          ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
         const SizedBox(height: 18),
         const Text(
           'Research prototype. Not a medical device.\nDo not use for treatment decisions.',
