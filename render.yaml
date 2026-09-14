@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: glucose-backend
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: DATABASE_PATH
+        value: /app/online_database.sqlite
+      - key: ALLOWED_ORIGINS
+        value: "*"
