@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../state/auth_providers.dart';
+import '../../state/sync_providers.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -49,9 +50,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const Icon(Icons.water_drop, size: 52, color: AppColors.accent),
                   const SizedBox(height: 14),
                   const Text('Glucose Monitor', textAlign: TextAlign.center, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  const Text('Log in to continue', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: AppColors.muted)),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: ref.watch(networkModeProvider) ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: ref.watch(networkModeProvider) ? Colors.green.shade400 : Colors.orange.shade400,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            ref.watch(networkModeProvider) ? Icons.cloud_done : Icons.cloud_off,
+                            size: 14,
+                            color: ref.watch(networkModeProvider) ? Colors.green.shade700 : Colors.orange.shade800,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            ref.watch(networkModeProvider) ? 'SERVER CONNECTED' : 'SERVER UNREACHABLE (OFFLINE)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: ref.watch(networkModeProvider) ? Colors.green.shade800 : Colors.orange.shade900,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   TextFormField(
                     controller: _username,
                     textInputAction: TextInputAction.next,

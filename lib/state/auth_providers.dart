@@ -4,10 +4,15 @@ import '../data/auth_repository.dart';
 import '../models/app_user.dart';
 import 'data_providers.dart';
 
+import 'sync_providers.dart';
+
 const _sessionUserIdKey = 'session_user_id';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository(ref.watch(databaseProvider));
+  return AuthRepository(
+    ref.watch(databaseProvider),
+    ref.watch(onlineDatabaseServiceProvider),
+  );
 });
 
 /// Resolves the persisted session (if any) on boot, and exposes
@@ -28,6 +33,10 @@ class AuthController extends AsyncNotifier<AppUser?> {
     state = await AsyncValue.guard(() async {
       final user = await ref.read(authRepositoryProvider).login(username, password);
       await ref.read(sharedPreferencesProvider).setInt(_sessionUserIdKey, user.id);
+      final onlineDb = ref.read(onlineDatabaseServiceProvider);
+      if (onlineDb.authToken != null) {
+        await ref.read(settingsRepositoryProvider).setAuthToken(onlineDb.authToken);
+      }
       return user;
     });
   }
@@ -37,12 +46,18 @@ class AuthController extends AsyncNotifier<AppUser?> {
     state = await AsyncValue.guard(() async {
       final user = await ref.read(authRepositoryProvider).register(username, password);
       await ref.read(sharedPreferencesProvider).setInt(_sessionUserIdKey, user.id);
+      final onlineDb = ref.read(onlineDatabaseServiceProvider);
+      if (onlineDb.authToken != null) {
+        await ref.read(settingsRepositoryProvider).setAuthToken(onlineDb.authToken);
+      }
       return user;
     });
   }
 
   Future<void> logout() async {
     await ref.read(sharedPreferencesProvider).remove(_sessionUserIdKey);
+    await ref.read(settingsRepositoryProvider).setAuthToken(null);
+    ref.read(onlineDatabaseServiceProvider).authToken = null;
     state = const AsyncData(null);
   }
 }

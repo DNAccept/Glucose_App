@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/readings_repository.dart';
 import '../models/glucose_reading.dart';
 import '../models/reference_reading.dart';
+import 'alert_providers.dart';
 import 'ble_providers.dart';
 import 'data_providers.dart';
 import 'settings_providers.dart';
+import 'sync_providers.dart';
 
 /// Lower/upper bounds for the custom History time-range picker.
 const historyWindowMin = Duration(minutes: 30);
@@ -49,17 +51,31 @@ final accuracyProvider = StreamProvider<AccuracySummary>((ref) {
   return ref.watch(referenceRepositoryProvider).watchAccuracy();
 });
 
-/// Bridges the live BLE reading stream into storage + alerting. Kept alive
+/// Bridges the live BLE reading stream into storage + alerting + auto-sync. Kept alive
 /// for the lifetime of the app by being watched once from [RootShell].
 final readingsIngestProvider = Provider<void>((ref) {
   final ble = ref.watch(bleManagerProvider);
   final repo = ref.watch(readingsRepositoryProvider);
   final notifications = ref.watch(notificationServiceProvider);
+  final syncService = ref.watch(syncServiceProvider);
 
   final sub = ble.readings.listen((reading) async {
     await repo.addReading(reading);
     final alertsEnabled = ref.read(alertsEnabledProvider);
-    await notifications.onReading(reading, alertsEnabled: alertsEnabled);
+    final snoozedUntil = ref.read(alertSnoozeProvider);
+    final lowThresh = ref.read(lowThresholdProvider);
+    final highThresh = ref.read(highThresholdProvider);
+    final urgentLowThresh = ref.read(urgentLowThresholdProvider);
+
+    await notifications.onReading(
+      reading,
+      alertsEnabled: alertsEnabled,
+      snoozedUntil: snoozedUntil,
+      lowThresholdMgDl: lowThresh,
+      highThresholdMgDl: highThresh,
+      urgentLowThresholdMgDl: urgentLowThresh,
+    );
+    syncService.onLocalDataWritten();
   });
   ref.onDispose(sub.cancel);
 });

@@ -47,3 +47,9 @@ app.*.map.json
 .gradle/
 __pycache__/
 *.pyc
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/app_database.dart';
+import '../data/calibration_repository.dart';
 import '../data/readings_repository.dart';
 import '../data/settings_repository.dart';
 import '../services/notification_service.dart';
@@ -30,7 +31,15 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return SettingsRepository(ref.watch(sharedPreferencesProvider));
 });
 
+final calibrationRepositoryProvider = Provider<CalibrationRepository>((ref) {
+  return CalibrationRepository(
+    ref.watch(sharedPreferencesProvider),
+    ref.watch(referenceRepositoryProvider),
+  );
+});
+
 final notificationServiceProvider = Provider<NotificationService>((ref) {
+
   final service = NotificationService();
   service.init();
   return service;

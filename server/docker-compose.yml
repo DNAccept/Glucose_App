@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  cgm-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: glucose-online-backend
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_PATH=/data/online_database.sqlite
+      - ALLOWED_ORIGINS=*
+    volumes:
+      - cgm_data:/data
+
+volumes:
+  cgm_data:
+    driver: local

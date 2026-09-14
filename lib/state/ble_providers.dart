@@ -4,9 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_manager.dart';
 import '../ble/real_ble_manager.dart';
+import 'simulation_providers.dart';
 
-/// Active BLE Manager wired directly to physical Bluetooth hardware.
+/// Active BLE Manager dynamically wired to physical hardware or the simulation engine.
 final bleManagerProvider = Provider<BleManager>((ref) {
+  final isSimulation = ref.watch(isSimulationModeProvider);
+  if (isSimulation) {
+    return ref.watch(simulatedBleManagerProvider);
+  }
   final real = RealBleManager();
   ref.onDispose(() => real.dispose());
   return real;

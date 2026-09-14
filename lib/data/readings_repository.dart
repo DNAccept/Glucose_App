@@ -60,17 +60,22 @@ class ReadingsRepository {
 
   final AppDatabase _db;
 
-  Future<void> addReading(GlucoseReading reading) {
+  Future<void> addReading(GlucoseReading reading, {int? userId}) {
     return _db.into(_db.readings).insert(ReadingsCompanion.insert(
           timestamp: reading.timestamp,
           mgDl: reading.mgDl,
           glucoseClass: reading.glucoseClass.wireValue,
           confidence: reading.confidence,
+          userId: Value(userId),
+          syncStatus: const Value(SyncStatus.pendingSync),
+          lastModified: Value(DateTime.now()),
+          isDeleted: const Value(false),
         ));
   }
 
   Stream<GlucoseReading?> watchLatest() {
     final query = _db.select(_db.readings)
+      ..where((t) => t.isDeleted.equals(false))
       ..orderBy([(t) => OrderingTerm.desc(t.timestamp)])
       ..limit(1);
     return query.watch().map((rows) => rows.isEmpty ? null : _toReading(rows.first));
@@ -79,7 +84,7 @@ class ReadingsRepository {
   Stream<List<GlucoseReading>> watchWindow(Duration window, {int? limit}) {
     final cutoff = DateTime.now().subtract(window);
     final query = _db.select(_db.readings)
-      ..where((t) => t.timestamp.isBiggerOrEqualValue(cutoff))
+      ..where((t) => t.timestamp.isBiggerOrEqualValue(cutoff) & t.isDeleted.equals(false))
       ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]);
     if (limit != null) query.limit(limit);
     return query.watch().map((rows) => rows.map(_toReading).toList());
@@ -129,7 +134,7 @@ class ReferenceRepository {
 
   final AppDatabase _db;
 
-  Future<void> addReference(ReferenceReading reading) {
+  Future<void> addReference(ReferenceReading reading, {int? userId}) {
     return _db.into(_db.referenceReadings).insert(ReferenceReadingsCompanion.insert(
           referenceValueMgDl: reading.referenceValueMgDl,
           referenceClass: reading.referenceClass.wireValue,
@@ -137,15 +142,26 @@ class ReferenceRepository {
           deviceClass: Value(reading.deviceClass?.wireValue),
           deviceConfidence: Value(reading.deviceConfidence),
           timestamp: reading.timestamp,
+          userId: Value(userId),
+          syncStatus: const Value(SyncStatus.pendingSync),
+          lastModified: Value(DateTime.now()),
+          isDeleted: const Value(false),
         ));
   }
 
   Future<void> deleteReference(int id) {
-    return (_db.delete(_db.referenceReadings)..where((t) => t.id.equals(id))).go();
+    return (_db.update(_db.referenceReadings)..where((t) => t.id.equals(id))).write(
+      ReferenceReadingsCompanion(
+        isDeleted: const Value(true),
+        syncStatus: const Value(SyncStatus.pendingSync),
+        lastModified: Value(DateTime.now()),
+      ),
+    );
   }
 
   Stream<List<ReferenceReading>> watchAll() {
     final query = _db.select(_db.referenceReadings)
+      ..where((t) => t.isDeleted.equals(false))
       ..orderBy([(t) => OrderingTerm.desc(t.timestamp)]);
     return query.watch().map((rows) => rows.map(_toReference).toList());
   }

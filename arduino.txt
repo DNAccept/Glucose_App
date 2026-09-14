@@ -1,0 +1,213 @@
+// august5.ino - august4 plus instrumentation for two open faults:
+//   (a) BPM stays 0 while the OLED correctly shows "measuring"
+//   (b) accelerometer values never change
+//
+// Everything added here is diagnostic. Once both faults are understood, the
+// Serial.printf in loop() and the extra OLED line can come back out.
+//
+// BEFORE UPLOADING: check config.h has
+//     #define APP_QUEUE_SIZE  128     // 2 s at 64 sps, was 80 for 8 sps
+// If it is still 80 the driver's HR algorithm works on a 1.25 s window and
+// will never converge - that alone explains bpm=0.
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Maxm86161_hrm_system.h>
+
+#define SDA_PIN   2
+#define SCL_PIN   1
+#define OLED_ADDR 0x3C
+#define MAXM_ADDR 0x62
+#define MPU_ADDR  0x68
+
+#define SR_MEASURING 0x0D          // 64 sps = finger present
+
+#define HEART_CX  98
+#define HEART_CY  26
+#define R_MIN     6
+#define R_MAX     10
+#define FRAME_MS  50               // 20 fps display
+#define LOG_MS    1000             // 1 Hz serial diagnostics
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+Maxm86161_hrm_system m_maxm86161;
+
+unsigned long lastFrame = 0, lastLog = 0;
+float beatPhase = 0.0;
+
+// raw accelerometer counts, kept so we can see change the floats might hide
+int16_t rawX = 0, rawY = 0, rawZ = 0;
+uint8_t mpuPwr = 0xFF;             // register 0x6B: 0x00 awake, 0x40 asleep
+uint8_t mpuWho = 0xFF;             // register 0x75: should read 0x68
+bool    mpuReadOK = false;
+int     mpuFailCount = 0;
+
+// ---------- generic I2C register read ----------
+uint8_t readReg(uint8_t addr, uint8_t reg){
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if(Wire.endTransmission(false) != 0) return 0xFF;
+  Wire.requestFrom(addr, (uint8_t)1);
+  return Wire.available() ? Wire.read() : 0xFF;
+}
+
+bool writeReg(uint8_t addr, uint8_t reg, uint8_t val){
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+bool fingerPresent(){
+  uint8_t cfg2 = readReg(MAXM_ADDR, 0x12);
+  if(cfg2 == 0xFF) return false;
+  return (((cfg2 >> 3) & 0x1F) == SR_MEASURING);
+}
+
+// ---------- MPU-6050 ----------
+// The wake write is now CHECKED and retried. Silently ignoring its return was
+// how a sleeping MPU could look identical to a working one.
+bool mpuInit(){
+  for(int attempt = 0; attempt < 3; attempt++){
+    if(writeReg(MPU_ADDR, 0x6B, 0x00)){          // clear SLEEP bit
+      delay(100);                                 // datasheet: needs settling time
+      uint8_t pwr = readReg(MPU_ADDR, 0x6B);
+      if(pwr == 0x00){
+        writeReg(MPU_ADDR, 0x1C, 0x00);          // accel range +/-2g
+        writeReg(MPU_ADDR, 0x1A, 0x03);          // DLPF 44 Hz, steadies the readings
+        return true;
+      }
+      Serial.printf("  MPU wake attempt %d: 0x6B reads 0x%02X (want 0x00)\n",
+                    attempt + 1, pwr);
+    } else {
+      Serial.printf("  MPU wake attempt %d: I2C write failed\n", attempt + 1);
+    }
+    delay(50);
+  }
+  return false;
+}
+
+bool readAccelRaw(int16_t &x, int16_t &y, int16_t &z){
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);
+  if(Wire.endTransmission(false) != 0) return false;     // NACK on the address
+
+  uint8_t n = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6);
+  if(n != 6) return false;                                // short read
+
+  uint8_t xh = Wire.read(), xl = Wire.read();
+  uint8_t yh = Wire.read(), yl = Wire.read();
+  uint8_t zh = Wire.read(), zl = Wire.read();
+  x = (int16_t)((xh << 8) | xl);
+  y = (int16_t)((yh << 8) | yl);
+  z = (int16_t)((zh << 8) | zl);
+  return true;
+}
+
+// ---------- heart ----------
+void drawHeart(int cx, int cy, int r, bool filled){
+  if(filled){
+    display.fillCircle(cx - r, cy, r, SSD1306_WHITE);
+    display.fillCircle(cx + r, cy, r, SSD1306_WHITE);
+    display.fillTriangle(cx - 2*r, cy, cx + 2*r, cy, cx, cy + 2*r, SSD1306_WHITE);
+  } else {
+    display.drawCircle(cx - r, cy, r, SSD1306_WHITE);
+    display.drawCircle(cx + r, cy, r, SSD1306_WHITE);
+    display.drawTriangle(cx - 2*r, cy, cx + 2*r, cy, cx, cy + 2*r, SSD1306_WHITE);
+  }
+}
+
+float beatEnvelope(float p){
+  if(p < 0.12)      return p / 0.12;
+  else if(p < 0.30) return 1.0 - (p - 0.12) / 0.18 * 0.70;
+  else if(p < 0.40) return 0.30 + (p - 0.30) / 0.10 * 0.40;
+  else if(p < 0.65) return 0.70 * (1.0 - (p - 0.40) / 0.25);
+  else              return 0.0;
+}
+
+void setup(){
+  Serial.begin(115200);
+  delay(2000);
+  Serial.println("\n=== august5 diagnostic build ===");
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(400000);
+
+  bool oledOK = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  Serial.printf("OLED   : %s\n", oledOK ? "ok" : "NOT FOUND");
+
+  mpuWho = readReg(MPU_ADDR, 0x75);
+  Serial.printf("MPU WHO_AM_I (0x75) = 0x%02X  (expect 0x68)\n", mpuWho);
+
+  bool mpuOK = mpuInit();
+  mpuPwr = readReg(MPU_ADDR, 0x6B);
+  Serial.printf("MPU    : %s   PWR_MGMT_1 (0x6B) = 0x%02X  (0x00 awake, 0x40 asleep)\n",
+                mpuOK ? "awake" : "FAILED TO WAKE", mpuPwr);
+
+  int rc = m_maxm86161.hrm_init();
+  Serial.printf("hrm_init: %d %s\n", rc, rc == 1 ? "(ok)" : "(FAILED)");
+
+  Serial.println("\nPlace a finger and hold still for 30 s. Tilt the board to test accel.");
+  Serial.println("Columns: t | reg0x12 | hr | accel raw counts | accel g | mpu read | fails\n");
+
+  lastFrame = millis();
+  lastLog   = millis();
+}
+
+void loop(){
+  m_maxm86161.hrm_loop_process();          // must run every pass
+
+  unsigned long now = millis();
+  if(now - lastFrame < FRAME_MS) return;
+  float dt = (now - lastFrame) / 1000.0;
+  lastFrame = now;
+
+  bool finger = fingerPresent();
+  int  hr     = m_maxm86161.hrm_get_heart_rate();
+
+  mpuReadOK = readAccelRaw(rawX, rawY, rawZ);
+  if(!mpuReadOK) mpuFailCount++;
+  float ax = rawX / 16384.0, ay = rawY / 16384.0, az = rawZ / 16384.0;
+
+  // ---- animation ----
+  bool beating = (finger && hr >= 40 && hr <= 200);
+  if(beating){
+    beatPhase += dt * (hr / 60.0);
+    while(beatPhase >= 1.0) beatPhase -= 1.0;
+  } else {
+    beatPhase = 0.0;
+  }
+  int r = R_MIN;
+  if(beating) r = R_MIN + (int)(beatEnvelope(beatPhase) * (R_MAX - R_MIN) + 0.5);
+
+  // ---- OLED ----
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,0);
+  if(finger){ display.print("HR "); display.print(hr); display.print(" bpm"); }
+  else      { display.print("place finger"); }
+  display.setCursor(0,10); display.print(finger ? "measuring" : "idle");
+  // raw counts, not g: 3 decimal places of g can hide real movement
+  display.setCursor(0,26); display.print("X"); display.print(rawX);
+  display.setCursor(64,26); display.print("Y"); display.print(rawY);
+  display.setCursor(0,38); display.print("Z"); display.print(rawZ);
+  display.setCursor(0,52);
+  display.print(mpuReadOK ? "mpu ok" : "mpu FAIL");
+  display.print(" f:"); display.print(mpuFailCount);
+
+  drawHeart(HEART_CX, HEART_CY, r, beating);
+  display.display();
+
+  // ---- serial, once a second ----
+  if(now - lastLog >= LOG_MS){
+    lastLog = now;
+    uint8_t cfg2 = readReg(MAXM_ADDR, 0x12);
+    uint8_t pwr  = readReg(MPU_ADDR, 0x6B);
+    Serial.printf("t=%3lus  reg12=0x%02X  hr=%3d  raw=%6d,%6d,%6d  g=%+.2f,%+.2f,%+.2f  "
+                  "mpu=%s pwr=0x%02X fails=%d\n",
+                  now / 1000, cfg2, hr, rawX, rawY, rawZ, ax, ay, az,
+                  mpuReadOK ? "ok" : "FAIL", pwr, mpuFailCount);
+  }
+}

@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glucose_monitor/data/app_database.dart';
 import 'package:glucose_monitor/data/auth_repository.dart';
+import 'package:glucose_monitor/data/online_database_service.dart';
 
 void main() {
   late AppDatabase db;
@@ -54,5 +55,22 @@ void main() {
 
   test('getUserById returns null for an unknown id', () async {
     expect(await auth.getUserById(999), isNull);
+  });
+
+  test('register and login with OnlineDatabaseService synced account', () async {
+    final onlineDb = OnlineDatabaseService(isOnline: true, serverUrl: '');
+    final onlineAuth = AuthRepository(db, onlineDb);
+
+    final user = await onlineAuth.register('clouduser', 'cloudpass123');
+    expect(user.username, 'clouduser');
+
+    final userRow = await (db.select(db.users)..where((t) => t.id.equals(user.id))).getSingle();
+    expect(userRow.remoteId, isNotNull);
+    expect(userRow.syncStatus, SyncStatus.synced);
+
+    final loggedIn = await onlineAuth.login('clouduser', 'cloudpass123');
+    expect(loggedIn.id, user.id);
+
+    onlineDb.dispose();
   });
 }

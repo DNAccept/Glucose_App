@@ -6,6 +6,7 @@ import '../../core/glucose_class.dart';
 import '../../core/theme.dart';
 import '../../models/glucose_reading.dart';
 import '../../models/reference_reading.dart';
+import '../../state/clinical_providers.dart';
 import '../../state/data_providers.dart';
 import '../../state/readings_providers.dart';
 import '../widgets/confusion_matrix.dart';
@@ -176,7 +177,12 @@ class _ReferenceScreenState extends ConsumerState<ReferenceScreen> {
       ),
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline, color: Color(0xFF9AA2AF)),
-        onPressed: e.id == null ? null : () => ref.read(referenceRepositoryProvider).deleteReference(e.id!),
+        onPressed: e.id == null
+            ? null
+            : () async {
+                await ref.read(referenceRepositoryProvider).deleteReference(e.id!);
+                await ref.read(glucoseCalibrationProvider.notifier).updateBaselineFromReferences();
+              },
       ),
     );
   }
@@ -191,6 +197,7 @@ class _ReferenceScreenState extends ConsumerState<ReferenceScreen> {
           deviceConfidence: latest?.confidence,
           timestamp: DateTime.now(),
         ));
+    await ref.read(glucoseCalibrationProvider.notifier).updateBaselineFromReferences();
     _controller.clear();
     setState(() {});
   }

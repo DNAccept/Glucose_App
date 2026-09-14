@@ -11,6 +11,7 @@ class NotificationRecord {
     required this.body,
     required this.timestamp,
     required this.glucoseClass,
+    this.isUrgent = false,
   });
 
   final int id;
@@ -18,11 +19,11 @@ class NotificationRecord {
   final String body;
   final DateTime timestamp;
   final GlucoseClass glucoseClass;
+  final bool isUrgent;
 }
 
-/// Fires a local alert only when the reported class transitions into
-/// low/high (edge-triggered), not on every reading — a stream of
-/// "still low" notifications would be noise rather than a warning.
+/// Clinical notification engine supporting emergency sound overrides,
+/// alert snoozing, custom thresholds, and stale data warnings.
 class NotificationService {
   NotificationService({FlutterLocalNotificationsPlugin? plugin})
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
@@ -38,10 +39,21 @@ class NotificationService {
       _history.where((n) => n.glucoseClass == GlucoseClass.low).length;
   int get highAlertsCount =>
       _history.where((n) => n.glucoseClass == GlucoseClass.high).length;
+  int get urgentAlertsCount => _history.where((n) => n.isUrgent).length;
 
-  static const _androidChannel = AndroidNotificationDetails(
+  static const _androidUrgentChannel = AndroidNotificationDetails(
+    'urgent_hypo_alerts',
+    'Urgent Hypo & Emergency Alerts',
+    channelDescription: 'Max priority sound and vibration alerts for severe hypoglycemia',
+    importance: Importance.max,
+    priority: Priority.max,
+    playSound: true,
+    enableVibration: true,
+  );
+
+  static const _androidStandardChannel = AndroidNotificationDetails(
     'glucose_alerts',
-    'Glucose alerts',
+    'Glucose Alerts',
     channelDescription: 'Low and high glucose state alerts',
     importance: Importance.high,
     priority: Priority.high,
@@ -55,6 +67,7 @@ class NotificationService {
         requestAlertPermission: true,
         requestBadgePermission: true,
         requestSoundPermission: true,
+        requestCriticalPermission: true,
       );
       await _plugin.initialize(
         const InitializationSettings(android: androidInit, iOS: iosInit),
@@ -74,21 +87,41 @@ class NotificationService {
       await _plugin
           .resolvePlatformSpecificImplementation<
               IOSFlutterLocalNotificationsPlugin>()
-          ?.requestPermissions(alert: true, badge: true, sound: true);
+          ?.requestPermissions(alert: true, badge: true, sound: true, critical: true);
     } catch (_) {}
   }
 
-  /// Call on every new reading; only notifies on a low/high transition.
-  Future<void> onReading(GlucoseReading reading, {required bool alertsEnabled}) async {
+  /// Call on every new reading; respects alert toggles, snooze state, edge-triggered transitions, and thresholds.
+  Future<void> onReading(
+    GlucoseReading reading, {
+    required bool alertsEnabled,
+    DateTime? snoozedUntil,
+    int lowThresholdMgDl = 70,
+    int highThresholdMgDl = 180,
+    int urgentLowThresholdMgDl = 55,
+  }) async {
     final previous = _lastClass;
     _lastClass = reading.glucoseClass;
-    if (!alertsEnabled) return;
-    if (reading.glucoseClass == GlucoseClass.normal) return;
-    if (previous == reading.glucoseClass) return; // already alerted for this episode
 
-    final title = '${reading.glucoseClass.label} glucose';
-    final body = '${reading.glucoseClass.clinicalName} — ${reading.mgDl.round()} mg/dL '
-        '(${reading.confidence}% confidence)';
+    if (!alertsEnabled) return;
+
+    // Check if snooze timer is currently active
+    if (snoozedUntil != null && DateTime.now().isBefore(snoozedUntil)) {
+      return; // Suppress alert during active snooze
+    }
+
+    final isUrgentLow = reading.mgDl <= urgentLowThresholdMgDl;
+    final isLow = reading.mgDl <= lowThresholdMgDl;
+    final isHigh = reading.mgDl >= highThresholdMgDl;
+
+    if (!isLow && !isHigh && !isUrgentLow) return;
+    if (previous == reading.glucoseClass && !isUrgentLow) return; // Edge-triggered
+
+    final isUrgent = isUrgentLow;
+    final title = isUrgent ? '🚨 URGENT LOW GLUCOSE ALARM' : '${reading.glucoseClass.label} glucose alert';
+    final body = isUrgent
+        ? 'CRITICAL: Glucose at ${reading.mgDl.round()} mg/dL! Take fast-acting carbs immediately.'
+        : '${reading.glucoseClass.clinicalName} — ${reading.mgDl.round()} mg/dL (${reading.confidence}% confidence)';
 
     _history.add(NotificationRecord(
       id: reading.glucoseClass.wireValue,
@@ -96,16 +129,23 @@ class NotificationService {
       body: body,
       timestamp: DateTime.now(),
       glucoseClass: reading.glucoseClass,
+      isUrgent: isUrgent,
     ));
 
     try {
+      final channel = isUrgent ? _androidUrgentChannel : _androidStandardChannel;
       await _plugin.show(
         reading.glucoseClass.wireValue,
         title,
         body,
-        const NotificationDetails(
-          android: _androidChannel,
-          iOS: DarwinNotificationDetails(),
+        NotificationDetails(
+          android: channel,
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentSound: true,
+            presentBadge: true,
+            interruptionLevel: isUrgent ? InterruptionLevel.critical : InterruptionLevel.active,
+          ),
         ),
       );
     } catch (_) {
@@ -113,10 +153,29 @@ class NotificationService {
     }
   }
 
+  /// Sends a notification alerting that no reading has arrived for > 15 minutes.
+  Future<void> notifyStaleData() async {
+    const id = 998;
+    const title = '⚠️ Glucose Data Stale';
+    const body = 'No reading received for over 15 minutes. Check wearable connection.';
+
+    try {
+      await _plugin.show(
+        id,
+        title,
+        body,
+        const NotificationDetails(
+          android: _androidStandardChannel,
+          iOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (_) {}
+  }
+
   /// Sends a local notification alerting that the wearable connection was lost.
   Future<void> notifyDisconnection({String? deviceName}) async {
     const id = 999;
-    final title = 'Wearable Disconnected';
+    const title = 'Wearable Disconnected';
     final body = deviceName != null
         ? '$deviceName connection was lost.'
         : 'Glucose Wearable connection lost.';
@@ -127,13 +186,11 @@ class NotificationService {
         title,
         body,
         const NotificationDetails(
-          android: _androidChannel,
+          android: _androidStandardChannel,
           iOS: DarwinNotificationDetails(),
         ),
       );
-    } catch (_) {
-      // Ignored in headless/test environments
-    }
+    } catch (_) {}
   }
 
   void reset() {
@@ -141,4 +198,3 @@ class NotificationService {
     _history.clear();
   }
 }
-

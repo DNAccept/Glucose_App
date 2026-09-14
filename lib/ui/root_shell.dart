@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_manager.dart';
 import '../core/theme.dart';
+import '../data/sync_service.dart';
 import '../state/ble_providers.dart';
 import '../state/data_providers.dart';
 import '../state/readings_providers.dart';
+import '../state/sync_providers.dart';
 import 'screens/device_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/now_screen.dart';
@@ -40,6 +42,8 @@ class _RootShellState extends ConsumerState<RootShell> {
     ref.watch(readingsIngestProvider);
 
     final activeTab = ref.watch(activeTabProvider);
+    final isOnline = ref.watch(networkModeProvider);
+    final syncResult = ref.watch(syncControllerProvider);
 
     // Visual in-app alert + push notification when device disconnects
     ref.listen<BleConnectionState>(connectionStateProvider, (prev, current) {
@@ -81,9 +85,16 @@ class _RootShellState extends ConsumerState<RootShell> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: IndexedStack(index: activeTab, children: _screens),
+        child: Column(
+          children: [
+            _NetworkHeader(isOnline: isOnline, syncResult: syncResult),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: IndexedStack(index: activeTab, children: _screens),
+              ),
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: NavigationBar(
@@ -94,6 +105,110 @@ class _RootShellState extends ConsumerState<RootShell> {
           NavigationDestination(icon: Icon(Icons.show_chart), label: 'History'),
           NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Device'),
           NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetworkHeader extends ConsumerWidget {
+  const _NetworkHeader({
+    required this.isOnline,
+    required this.syncResult,
+  });
+
+  final bool isOnline;
+  final SyncResult syncResult;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statusColor = isOnline ? Colors.green.shade700 : Colors.orange.shade800;
+    final statusBg = isOnline ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0);
+
+    String text = isOnline ? 'ONLINE SERVER CONNECTED' : 'SERVER UNREACHABLE (OFFLINE SQLITE)';
+    if (syncResult.status == SyncStateStatus.syncing) {
+      text = 'SYNCING WITH CLOUD...';
+    } else if (!isOnline && syncResult.pendingCount > 0) {
+      text = 'SERVER UNREACHABLE (${syncResult.pendingCount} PENDING SYNC)';
+    }
+
+    return Container(
+      width: double.infinity,
+      color: statusBg,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isOnline ? Icons.cloud_done : Icons.cloud_off,
+                  size: 15,
+                  color: statusColor,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    text,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: statusColor,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: () async {
+              final ok = await ref.read(networkModeProvider.notifier).recheck();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(ok ? 'Online server is reachable!' : 'Online server is unreachable.'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                border: Border.all(color: statusColor.withValues(alpha: 0.4)),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.refresh, size: 12, color: statusColor),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Ping Server',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: statusColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
