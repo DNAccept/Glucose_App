@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -61,6 +62,7 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isBluetoothOn = ref.watch(isBluetoothOnProvider);
     final connection = ref.watch(connectionStateProvider);
     final connectedDevice = ref.watch(connectedDeviceProvider);
     final battery = ref.watch(batteryLevelProvider);
@@ -134,7 +136,52 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
             ),
           ),
         ] else ...[
-          if (connection == BleConnectionState.disconnected && connectedDevice == null)
+          if (!isBluetoothOn)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.bluetooth_disabled, color: Color(0xFFDC2626), size: 22),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Bluetooth is Turned Off',
+                          style: TextStyle(fontSize: 13.5, color: Color(0xFF991B1B), fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Please turn on Bluetooth to scan for and connect to your wearable.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () async {
+                      try {
+                        await FlutterBluePlus.turnOn();
+                      } catch (_) {}
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFDC2626),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    ),
+                    child: const Text('Turn On', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ],
+              ),
+            )
+          else if (connection == BleConnectionState.disconnected && connectedDevice == null)
             Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -203,13 +250,19 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
                     ),
                     const SizedBox(height: 12),
                     FilledButton.icon(
-                      onPressed: connection == BleConnectionState.connecting
+                      onPressed: (!isBluetoothOn || connection == BleConnectionState.connecting)
                           ? null
                           : () => _triggerScan(manager),
-                      icon: const Icon(Icons.search),
-                      label: const Text('Scan for device'),
+                      icon: Icon(isBluetoothOn ? Icons.search : Icons.bluetooth_disabled),
+                      label: Text(
+                        !isBluetoothOn
+                            ? 'Bluetooth is Off (Enable to Scan)'
+                            : (connection == BleConnectionState.scanning ? 'Scanning…' : 'Scan for device'),
+                      ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.accent,
+                        backgroundColor: isBluetoothOn ? AppColors.accent : Colors.grey.shade400,
+                        disabledBackgroundColor: isBluetoothOn ? AppColors.accent.withValues(alpha: 0.5) : Colors.grey.shade300,
+                        disabledForegroundColor: isBluetoothOn ? Colors.white : Colors.grey.shade600,
                         minimumSize: const Size.fromHeight(46),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
@@ -224,15 +277,17 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
             child: Text('Found devices', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
           ),
           if (devices.isEmpty) ...[
-            if (connection != BleConnectionState.scanning && _hasAttemptedScan)
+            if (connection != BleConnectionState.scanning && _hasAttemptedScan && isBluetoothOn)
               _ScanFailedCard(onRetry: () => _triggerScan(manager))
             else
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Text(
-                  connection == BleConnectionState.scanning
-                      ? 'Searching over-the-air BLE signals...'
-                      : 'No devices yet. Try scanning.',
+                  !isBluetoothOn
+                      ? 'Bluetooth is off. Turn on Bluetooth to discover nearby devices.'
+                      : (connection == BleConnectionState.scanning
+                          ? 'Searching over-the-air BLE signals...'
+                          : 'No devices yet. Try scanning.'),
                   style: const TextStyle(fontSize: 13, color: AppColors.muted),
                 ),
               ),
@@ -251,7 +306,7 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
                   title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(d.rssi != 0 ? '${d.rssi} dBm' : 'Nearby', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                   trailing: FilledButton(
-                    onPressed: isConnectingThis || connection == BleConnectionState.connecting
+                    onPressed: isConnectingThis || connection == BleConnectionState.connecting || !isBluetoothOn
                         ? null
                         : () => _handleConnect(manager, d.id),
                     style: FilledButton.styleFrom(backgroundColor: AppColors.accent),

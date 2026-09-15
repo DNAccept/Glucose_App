@@ -18,8 +18,10 @@ class RealBleManager implements BleManager {
   final _batteryController = StreamController<int>.broadcast();
   final _discoveredController = StreamController<List<DiscoveredDevice>>.broadcast();
   final _connectedDeviceController = StreamController<DiscoveredDevice?>.broadcast();
+  final _isBluetoothOnController = StreamController<bool>.broadcast();
 
   BleConnectionState _connectionState = BleConnectionState.disconnected;
+  bool _isBluetoothOn = true;
   BluetoothDevice? _device;
   DiscoveredDevice? _currentDevice;
   int? _currentBatteryLevel;
@@ -41,7 +43,15 @@ class RealBleManager implements BleManager {
 
   void _listenAdapterState() {
     _adapterStateSub = FlutterBluePlus.adapterState.listen((adapterState) {
-      if (adapterState != BluetoothAdapterState.on) {
+      final isOn = adapterState == BluetoothAdapterState.on;
+      if (_isBluetoothOn != isOn) {
+        _isBluetoothOn = isOn;
+        if (!_isBluetoothOnController.isClosed) {
+          _isBluetoothOnController.add(isOn);
+        }
+      }
+
+      if (!isOn) {
         _stopScanningAndClearDiscovered();
         _handleDisconnect();
       }
@@ -85,6 +95,11 @@ class RealBleManager implements BleManager {
   Stream<DiscoveredDevice?> get connectedDevice => _connectedDeviceController.stream;
   @override
   DiscoveredDevice? get currentDevice => _currentDevice;
+
+  @override
+  Stream<bool> get isBluetoothOn => _isBluetoothOnController.stream;
+  @override
+  bool get currentIsBluetoothOn => _isBluetoothOn;
 
   void _setConnectionState(BleConnectionState state) {
     _connectionState = state;
@@ -523,5 +538,6 @@ class RealBleManager implements BleManager {
     await _batteryController.close();
     await _discoveredController.close();
     await _connectedDeviceController.close();
+    await _isBluetoothOnController.close();
   }
 }

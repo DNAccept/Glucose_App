@@ -33,6 +33,9 @@ abstract class BleManager {
   Stream<DiscoveredDevice?> get connectedDevice;
   DiscoveredDevice? get currentDevice;
 
+  Stream<bool> get isBluetoothOn;
+  bool get currentIsBluetoothOn;
+
   Future<void> startScan();
   Future<void> stopScan();
   Future<void> connect(String deviceId);

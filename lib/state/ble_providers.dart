@@ -93,4 +93,24 @@ final connectedDeviceProvider = StateNotifierProvider<ConnectedDeviceNotifier, D
   return ConnectedDeviceNotifier(ref.watch(bleManagerProvider));
 });
 
+class IsBluetoothOnNotifier extends StateNotifier<bool> {
+  IsBluetoothOnNotifier(this._manager) : super(_manager.currentIsBluetoothOn) {
+    _sub = _manager.isBluetoothOn.listen((isOn) => state = isOn);
+  }
+
+  final BleManager _manager;
+  late final StreamSubscription<bool> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+final isBluetoothOnProvider = StateNotifierProvider<IsBluetoothOnNotifier, bool>((ref) {
+  return IsBluetoothOnNotifier(ref.watch(bleManagerProvider));
+});
+
+
 

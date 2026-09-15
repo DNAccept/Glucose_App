@@ -63,6 +63,11 @@ class SimulatedBleManager implements BleManager {
   @override
   DiscoveredDevice? get currentDevice => _currentDevice;
 
+  @override
+  Stream<bool> get isBluetoothOn => Stream.value(true);
+  @override
+  bool get currentIsBluetoothOn => true;
+
   // Simulation API
   Stream<String> get eventLogStream => _eventLogController.stream;
   Stream<bool> get playbackStateStream => _playbackStateController.stream;
