@@ -10,13 +10,9 @@ class SimulatedBleManager implements BleManager {
   }
 
   void _initDefaults() {
-    _connectionState = BleConnectionState.connected;
-    _currentBattery = 95;
-    _currentDevice = const DiscoveredDevice(
-      id: 'SIM-WEARABLE-001',
-      name: 'Simulated Glucose Wearable',
-      rssi: -55,
-    );
+    _connectionState = BleConnectionState.disconnected;
+    _currentBattery = null;
+    _currentDevice = null;
   }
 
   // BleManager StreamControllers
@@ -30,13 +26,9 @@ class SimulatedBleManager implements BleManager {
   final _eventLogController = StreamController<String>.broadcast();
   final _playbackStateController = StreamController<bool>.broadcast();
 
-  BleConnectionState _connectionState = BleConnectionState.connected;
-  int? _currentBattery = 95;
-  DiscoveredDevice? _currentDevice = const DiscoveredDevice(
-    id: 'SIM-WEARABLE-001',
-    name: 'Simulated Glucose Wearable',
-    rssi: -55,
-  );
+  BleConnectionState _connectionState = BleConnectionState.disconnected;
+  int? _currentBattery;
+  DiscoveredDevice? _currentDevice;
   List<DiscoveredDevice> _discoveredList = [];
 
   // Playback state

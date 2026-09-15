@@ -9,6 +9,10 @@ import 'glucose_reading_codec.dart';
 
 /// Talks to the real wearable over BLE using the contract in [BleContract].
 class RealBleManager implements BleManager {
+  RealBleManager() {
+    _listenAdapterState();
+  }
+
   final _connectionStateController = StreamController<BleConnectionState>.broadcast();
   final _readingsController = StreamController<GlucoseReading>.broadcast();
   final _batteryController = StreamController<int>.broadcast();
@@ -24,6 +28,7 @@ class RealBleManager implements BleManager {
   BluetoothCharacteristic? _activeReadingChar;
   List<DiscoveredDevice> _discoveredDevices = [];
 
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<bool>? _isScanningSub;
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
@@ -33,6 +38,30 @@ class RealBleManager implements BleManager {
   StreamSubscription<List<int>>? _batterySub;
   Timer? _sessionWatchdogTimer;
   Timer? _scanPruneTimer;
+
+  void _listenAdapterState() {
+    _adapterStateSub = FlutterBluePlus.adapterState.listen((adapterState) {
+      if (adapterState != BluetoothAdapterState.on) {
+        _stopScanningAndClearDiscovered();
+        _handleDisconnect();
+      }
+    });
+  }
+
+  void _stopScanningAndClearDiscovered() {
+    _scanPruneTimer?.cancel();
+    _scanPruneTimer = null;
+    _scanSub?.cancel();
+    _scanSub = null;
+    _isScanningSub?.cancel();
+    _isScanningSub = null;
+    FlutterBluePlus.stopScan().catchError((_) {});
+
+    _discoveredDevices = [];
+    if (!_discoveredController.isClosed) {
+      _discoveredController.add([]);
+    }
+  }
 
   @override
   Stream<BleConnectionState> get connectionState => _connectionStateController.stream;
@@ -79,6 +108,10 @@ class RealBleManager implements BleManager {
     _connectionSub = null;
     _globalConnSub?.cancel();
     _globalConnSub = null;
+    _scanSub?.cancel();
+    _scanSub = null;
+    _isScanningSub?.cancel();
+    _isScanningSub = null;
 
     final wasConnectedOrConnecting = _connectionState == BleConnectionState.connected ||
         _connectionState == BleConnectionState.connecting;
@@ -105,6 +138,13 @@ class RealBleManager implements BleManager {
 
   @override
   Future<void> startScan() async {
+    final adapterState = await FlutterBluePlus.adapterState.first;
+    if (adapterState != BluetoothAdapterState.on) {
+      _stopScanningAndClearDiscovered();
+      _handleDisconnect();
+      return;
+    }
+
     _setConnectionState(BleConnectionState.scanning);
     _discoveredDevices = [];
     if (!_discoveredController.isClosed) {
@@ -167,36 +207,57 @@ class RealBleManager implements BleManager {
       final now = DateTime.now();
       for (final r in results) {
         // Only accept devices actively emitting broadcast signals
-        if (r.rssi < -95) continue;
+        if (r.rssi < -90) continue;
 
         final rawName = r.device.platformName.isNotEmpty
             ? r.device.platformName
             : r.advertisementData.advName;
+        final rawNameLower = rawName.trim().toLowerCase();
 
+        // Exact Glucose Service UUID validation:
+        // Must match contract UUID (0000a000-0000-1000-8000-00805f9b34fb or 0000a000-...),
+        // or standard Bluetooth SIG Glucose service (00001808-...) or CGM service (0000181f-...).
         final hasGlucoseService = r.advertisementData.serviceUuids.any((u) {
           final s = u.str128.toLowerCase();
-          final sStr = u.toString().toLowerCase();
           return s == BleContract.serviceUuid.toLowerCase() ||
-              s.contains('a000') ||
-              sStr.contains('a000') ||
-              u == Guid(BleContract.serviceUuid) ||
-              u == Guid('a000');
+              s.startsWith('0000a000-') ||
+              s.startsWith('00001808-') ||
+              s.startsWith('0000181f-');
         });
 
-        String displayName = rawName;
+        // Filter out generic, empty, or fallback OS Bluetooth names (e.g. "BLE Device (__:__)", "Unknown", "N/A", "Device")
+        final isGenericName = rawName.isEmpty ||
+            rawNameLower.startsWith('ble device') ||
+            rawNameLower.startsWith('unknown') ||
+            rawNameLower.startsWith('n/a') ||
+            rawNameLower == 'device' ||
+            rawNameLower.contains('(__:__)');
+
+        if (!hasGlucoseService) {
+          // If it does NOT advertise an explicit Glucose Service UUID, and the name is generic or does NOT contain explicit glucose keywords, SKIP IT.
+          final isGlucoseDeviceName = !isGenericName && (
+              rawNameLower.contains('glucose') ||
+              rawNameLower.contains('wearable') ||
+              rawNameLower.contains('cgm') ||
+              rawNameLower.contains('dna') ||
+              rawNameLower.contains('monitor') ||
+              rawNameLower.contains('dexcom') ||
+              rawNameLower.contains('freestyle') ||
+              rawNameLower.contains('libre')
+          );
+
+          if (!isGlucoseDeviceName) {
+            continue; // Skip non-glucose device completely
+          }
+        }
+
+        String displayName;
         if (hasGlucoseService) {
-          displayName = rawName.isNotEmpty
+          displayName = (!isGenericName && rawName.isNotEmpty)
               ? '⭐ Glucose Wearable ($rawName)'
               : '⭐ Glucose Wearable';
-        } else if (rawName.toLowerCase().contains('glucose') ||
-            rawName.toLowerCase().contains('wearable') ||
-            rawName.toLowerCase().contains('dna')) {
+        } else {
           displayName = '⭐ $rawName';
-        } else if (displayName.isEmpty) {
-          final idShort = r.device.remoteId.str.length > 5
-              ? r.device.remoteId.str.substring(0, 5)
-              : r.device.remoteId.str;
-          displayName = 'BLE Device ($idShort)';
         }
 
         final deviceId = r.device.remoteId.str;
@@ -233,13 +294,7 @@ class RealBleManager implements BleManager {
 
   @override
   Future<void> stopScan() async {
-    _scanPruneTimer?.cancel();
-    _scanPruneTimer = null;
-    await FlutterBluePlus.stopScan();
-    await _scanSub?.cancel();
-    _scanSub = null;
-    await _isScanningSub?.cancel();
-    _isScanningSub = null;
+    _stopScanningAndClearDiscovered();
     if (_device == null) {
       _setConnectionState(BleConnectionState.disconnected);
     }
@@ -320,7 +375,7 @@ class RealBleManager implements BleManager {
       for (final service in services) {
         final sUuidStr = service.uuid.str128.toLowerCase();
         final isGlucoseService = sUuidStr == BleContract.serviceUuid.toLowerCase() ||
-            sUuidStr.contains('a000') ||
+            sUuidStr.startsWith('0000a000-') ||
             service.uuid == Guid(BleContract.serviceUuid) ||
             service.uuid == Guid('a000');
 
@@ -328,12 +383,12 @@ class RealBleManager implements BleManager {
           for (final char in service.characteristics) {
             final cUuidStr = char.uuid.str128.toLowerCase();
             final isReadingChar = cUuidStr == BleContract.readingCharacteristicUuid.toLowerCase() ||
-                cUuidStr.contains('a001') ||
+                cUuidStr.startsWith('0000a001-') ||
                 char.uuid == Guid(BleContract.readingCharacteristicUuid) ||
                 char.uuid == Guid('a001');
 
             final isSessionChar = cUuidStr == BleContract.sessionCharacteristicUuid.toLowerCase() ||
-                cUuidStr.contains('a002') ||
+                cUuidStr.startsWith('0000a002-') ||
                 char.uuid == Guid(BleContract.sessionCharacteristicUuid) ||
                 char.uuid == Guid('a002');
 
@@ -405,7 +460,7 @@ class RealBleManager implements BleManager {
         }
 
         final isBatteryService = sUuidStr == BleContract.batteryServiceUuid.toLowerCase() ||
-            sUuidStr.contains('180f') ||
+            sUuidStr.startsWith('0000180f-') ||
             service.uuid == Guid(BleContract.batteryServiceUuid) ||
             service.uuid == Guid('180f');
 
@@ -413,7 +468,7 @@ class RealBleManager implements BleManager {
           for (final char in service.characteristics) {
             final cUuidStr = char.uuid.str128.toLowerCase();
             final isBatteryChar = cUuidStr == BleContract.batteryLevelCharacteristicUuid.toLowerCase() ||
-                cUuidStr.contains('2a19') ||
+                cUuidStr.startsWith('00002a19-') ||
                 char.uuid == Guid(BleContract.batteryLevelCharacteristicUuid) ||
                 char.uuid == Guid('2a19');
 
@@ -461,15 +516,8 @@ class RealBleManager implements BleManager {
 
   @override
   Future<void> dispose() async {
-    _sessionWatchdogTimer?.cancel();
-    _sessionWatchdogTimer = null;
-    await _scanSub?.cancel();
-    await _isScanningSub?.cancel();
-    await _connectionSub?.cancel();
-    await _globalConnSub?.cancel();
-    await _readingSub?.cancel();
-    await _sessionSub?.cancel();
-    await _batterySub?.cancel();
+    _stopScanningAndClearDiscovered();
+    _handleDisconnect();
     await _connectionStateController.close();
     await _readingsController.close();
     await _batteryController.close();
