@@ -12,59 +12,14 @@ import '../../state/simulation_providers.dart';
 import '../../state/sync_providers.dart';
 import 'simulation_studio_screen.dart';
 
-class SettingsScreen extends ConsumerStatefulWidget {
+class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
-  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  late TextEditingController _serverUrlController;
-  bool _testingConnection = false;
-  String? _connectionResult;
-  bool _connectionSuccess = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final onlineDb = ref.read(onlineDatabaseServiceProvider);
-    _serverUrlController = TextEditingController(text: onlineDb.serverUrl ?? AppConfig.defaultServerUrl);
-  }
-
-  @override
-  void dispose() {
-    _serverUrlController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _testConnection() async {
-    setState(() {
-      _testingConnection = true;
-      _connectionResult = null;
-    });
-
-    final onlineDb = ref.read(onlineDatabaseServiceProvider);
-    onlineDb.serverUrl = _serverUrlController.text.trim();
-    final ok = await onlineDb.checkHealth();
-
-    if (mounted) {
-      setState(() {
-        _testingConnection = false;
-        _connectionSuccess = ok;
-        _connectionResult = ok
-            ? 'Connected to online database server (${onlineDb.serverUrl})'
-            : 'Unable to reach server at ${onlineDb.serverUrl}';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final alertsEnabled = ref.watch(alertsEnabledProvider);
     final cloudEnabled = ref.watch(cloudSyncEnabledProvider);
     final currentUser = ref.watch(authControllerProvider).valueOrNull;
-    final onlineDb = ref.watch(onlineDatabaseServiceProvider);
     final syncState = ref.watch(syncControllerProvider);
 
     return ListView(
@@ -156,7 +111,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        const _SectionLabel('Cloud Database & Localhost Server'),
+        const _SectionLabel('Cloud Backup & Synchronization'),
         Card(
           child: Column(
             children: [
@@ -180,11 +135,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.watch(networkModeProvider) ? Icons.cloud_done : Icons.cloud_off,
                   color: ref.watch(networkModeProvider) ? Colors.green.shade700 : Colors.orange.shade800,
                 ),
-                title: const Text('Server Connection Status'),
+                title: const Text('Cloud Connection Status'),
                 subtitle: Text(
                   ref.watch(networkModeProvider)
-                      ? 'Online server is reachable and connected'
-                      : 'Online server unreachable — using offline local SQLite storage',
+                      ? 'Cloud database is connected'
+                      : 'Cloud server unreachable — storing data locally on device',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: ref.watch(networkModeProvider) ? Colors.green.shade800 : Colors.orange.shade900,
@@ -197,164 +152,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                 title: const Text('Auto-Sync in Background'),
                 subtitle: Text(ref.watch(autoSyncEnabledProvider)
-                    ? 'Automatic mode (syncs on write, reconnect & 30s timer)'
+                    ? 'Automatic mode (syncs on new readings & reconnection)'
                     : 'Manual Mode (syncs only when tapping Sync Now)'),
                 value: ref.watch(autoSyncEnabledProvider),
                 activeTrackColor: AppColors.accent,
                 onChanged: (v) => ref.read(autoSyncEnabledProvider.notifier).set(v),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                      TextFormField(
-                        controller: _serverUrlController,
-                        decoration: InputDecoration(
-                          labelText: 'Online Database Server URL',
-                          hintText: AppConfig.renderServerUrl,
-                          isDense: true,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          suffixIcon: IconButton(
-                            icon: _testingConnection
-                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Icon(Icons.network_check),
-                            onPressed: () async {
-                              final url = _serverUrlController.text.trim();
-                              await ref.read(settingsRepositoryProvider).setServerUrl(url);
-                              await _testConnection();
-                            },
-                            tooltip: 'Test Connection',
-                          ),
-                        ),
-                        onChanged: (v) {
-                          onlineDb.serverUrl = v.trim();
-                          ref.read(settingsRepositoryProvider).setServerUrl(v.trim());
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      const Text('Quick Connection Mode:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.muted)),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (AppConfig.definedServerUrl.isNotEmpty)
-                            ActionChip(
-                              avatar: const Icon(Icons.cloud_done, size: 14),
-                              label: Text('Production Cloud (${AppConfig.definedServerUrl})', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                              onPressed: () async {
-                                _serverUrlController.text = AppConfig.definedServerUrl;
-                                onlineDb.serverUrl = AppConfig.definedServerUrl;
-                                await ref.read(settingsRepositoryProvider).setServerUrl(AppConfig.definedServerUrl);
-                                await _testConnection();
-                              },
-                            ),
-                          ActionChip(
-                            avatar: const Icon(Icons.travel_explore, size: 14),
-                            label: const Text('Auto-Discover', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                            onPressed: () async {
-                              await _testConnection();
-                              if (onlineDb.serverUrl != null) {
-                                _serverUrlController.text = onlineDb.serverUrl!;
-                                await ref.read(settingsRepositoryProvider).setServerUrl(onlineDb.serverUrl!);
+                    _buildSyncStatusBadge(syncState),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: syncState.status == SyncStateStatus.syncing
+                          ? null
+                          : () async {
+                              final res = await ref.read(syncControllerProvider.notifier).triggerSync();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(res.status == SyncStateStatus.success
+                                        ? 'Cloud sync completed successfully!'
+                                        : res.errorMessage ?? 'Sync finished (${res.status.name})'),
+                                    duration: const Duration(seconds: 3),
+                                  ),
+                                );
                               }
                             },
-                          ),
-                          ActionChip(
-                            avatar: const Icon(Icons.usb, size: 14),
-                            label: const Text('USB Cable', style: TextStyle(fontSize: 11.5)),
-                            onPressed: () async {
-                              _serverUrlController.text = 'http://127.0.0.1:8080';
-                              onlineDb.serverUrl = 'http://127.0.0.1:8080';
-                              await ref.read(settingsRepositoryProvider).setServerUrl('http://127.0.0.1:8080');
-                              await _testConnection();
-                            },
-                          ),
-                          ActionChip(
-                            avatar: const Icon(Icons.wifi, size: 14),
-                            label: const Text('Wi-Fi (192.168.137.118)', style: TextStyle(fontSize: 11.5)),
-                            onPressed: () async {
-                              _serverUrlController.text = 'http://192.168.137.118:8080';
-                              onlineDb.serverUrl = 'http://192.168.137.118:8080';
-                              await ref.read(settingsRepositoryProvider).setServerUrl('http://192.168.137.118:8080');
-                              await _testConnection();
-                            },
-                          ),
-                          ActionChip(
-                            avatar: const Icon(Icons.phonelink, size: 14),
-                            label: const Text('Emulator', style: TextStyle(fontSize: 11.5)),
-                            onPressed: () async {
-                              _serverUrlController.text = 'http://10.0.2.2:8080';
-                              onlineDb.serverUrl = 'http://10.0.2.2:8080';
-                              await ref.read(settingsRepositoryProvider).setServerUrl('http://10.0.2.2:8080');
-                              await _testConnection();
-                            },
-                          ),
-                        ],
+                      icon: syncState.status == SyncStateStatus.syncing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.cloud_upload_outlined),
+                      label: Text(syncState.status == SyncStateStatus.syncing ? 'Syncing...' : 'Sync now'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
-                      if (_connectionResult != null) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              _connectionSuccess ? Icons.check_circle_outline : Icons.error_outline,
-                              size: 16,
-                              color: _connectionSuccess ? Colors.green : Colors.red,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                _connectionResult!,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: _connectionSuccess ? Colors.green.shade800 : Colors.red.shade800,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      _buildSyncStatusBadge(syncState),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: syncState.status == SyncStateStatus.syncing
-                            ? null
-                            : () async {
-                                final res = await ref.read(syncControllerProvider.notifier).triggerSync();
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(res.status == SyncStateStatus.success
-                                          ? 'Cloud sync completed successfully!'
-                                          : res.errorMessage ?? 'Sync finished (${res.status.name})'),
-                                      duration: const Duration(seconds: 3),
-                                    ),
-                                  );
-                                }
-                              },
-                        icon: syncState.status == SyncStateStatus.syncing
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.cloud_upload_outlined),
-                        label: Text(syncState.status == SyncStateStatus.syncing ? 'Syncing...' : 'Sync now'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          minimumSize: const Size.fromHeight(46),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+        ),
         const SizedBox(height: 14),
         const _SectionLabel('Developer Options'),
         Card(
