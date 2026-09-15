@@ -277,8 +277,11 @@ class _DeviceScreenState extends ConsumerState<DeviceScreen> {
             child: Text('Found devices', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
           ),
           if (devices.isEmpty) ...[
-            if (connection != BleConnectionState.scanning && _hasAttemptedScan && isBluetoothOn)
-              _ScanFailedCard(onRetry: () => _triggerScan(manager))
+            if (_hasAttemptedScan && isBluetoothOn)
+              _ScanFailedCard(
+                onRetry: () => _triggerScan(manager),
+                isScanning: connection == BleConnectionState.scanning,
+              )
             else
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -413,10 +416,65 @@ class _RadarScanAnimationState extends State<_RadarScanAnimation>
   }
 }
 
+class _RotatingRefreshIcon extends StatefulWidget {
+  const _RotatingRefreshIcon({required this.isScanning});
+
+  final bool isScanning;
+
+  @override
+  State<_RotatingRefreshIcon> createState() => _RotatingRefreshIconState();
+}
+
+class _RotatingRefreshIconState extends State<_RotatingRefreshIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    if (widget.isScanning) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _RotatingRefreshIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isScanning && !_controller.isAnimating) {
+      _controller.repeat();
+    } else if (!widget.isScanning && _controller.isAnimating) {
+      _controller.stop();
+      _controller.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: const Icon(Icons.refresh),
+    );
+  }
+}
+
 class _ScanFailedCard extends StatelessWidget {
-  const _ScanFailedCard({required this.onRetry});
+  const _ScanFailedCard({
+    required this.onRetry,
+    required this.isScanning,
+  });
 
   final VoidCallback onRetry;
+  final bool isScanning;
 
   @override
   Widget build(BuildContext context) {
@@ -476,9 +534,9 @@ class _ScanFailedCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry Scan'),
+              onPressed: isScanning ? null : onRetry,
+              icon: _RotatingRefreshIcon(isScanning: isScanning),
+              label: Text(isScanning ? 'Rescanning...' : 'Retry Scan'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFDC2626),
                 side: const BorderSide(color: Color(0xFFFCA5A5)),

@@ -192,7 +192,7 @@ class RealBleManager implements BleManager {
 
       seen.removeWhere((id, device) {
         final lastTime = lastSeen[id];
-        if (lastTime == null || now.difference(lastTime) > const Duration(seconds: 4)) {
+        if (lastTime == null || now.difference(lastTime) > const Duration(seconds: 6)) {
           lastSeen.remove(id);
           changed = true;
           return true;
@@ -302,7 +302,7 @@ class RealBleManager implements BleManager {
 
     try {
       await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 15),
+        timeout: const Duration(seconds: 30),
       );
     } catch (_) {}
   }
