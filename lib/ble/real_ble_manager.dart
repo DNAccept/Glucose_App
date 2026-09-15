@@ -32,6 +32,7 @@ class RealBleManager implements BleManager {
   StreamSubscription<List<int>>? _sessionSub;
   StreamSubscription<List<int>>? _batterySub;
   Timer? _sessionWatchdogTimer;
+  Timer? _scanPruneTimer;
 
   @override
   Stream<BleConnectionState> get connectionState => _connectionStateController.stream;
@@ -66,6 +67,8 @@ class RealBleManager implements BleManager {
   void _handleDisconnect() {
     _sessionWatchdogTimer?.cancel();
     _sessionWatchdogTimer = null;
+    _scanPruneTimer?.cancel();
+    _scanPruneTimer = null;
     _readingSub?.cancel();
     _readingSub = null;
     _sessionSub?.cancel();
@@ -110,22 +113,62 @@ class RealBleManager implements BleManager {
 
     await _scanSub?.cancel();
     await _isScanningSub?.cancel();
+    _scanPruneTimer?.cancel();
 
     if (FlutterBluePlus.isScanningNow) {
       await FlutterBluePlus.stopScan();
     }
 
     final seen = <String, DiscoveredDevice>{};
+    final lastSeen = <String, DateTime>{};
 
     _isScanningSub = FlutterBluePlus.isScanning.listen((isScanning) {
       if (!isScanning && _device == null && _currentDevice == null) {
         _setConnectionState(BleConnectionState.disconnected);
+        _scanPruneTimer?.cancel();
       }
     });
 
-    // Listen to active over-the-air BLE advertisement broadcasts
+    // Prune devices whose active broadcast advertisement signal stopped (no packet in last 4 seconds)
+    _scanPruneTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_connectionState != BleConnectionState.scanning) return;
+      final now = DateTime.now();
+      bool changed = false;
+
+      seen.removeWhere((id, device) {
+        final lastTime = lastSeen[id];
+        if (lastTime == null || now.difference(lastTime) > const Duration(seconds: 4)) {
+          lastSeen.remove(id);
+          changed = true;
+          return true;
+        }
+        return false;
+      });
+
+      if (changed) {
+        final list = seen.values.toList()
+          ..sort((a, b) {
+            final aMatch = a.name.startsWith('⭐');
+            final bMatch = b.name.startsWith('⭐');
+            if (aMatch && !bMatch) return -1;
+            if (!aMatch && bMatch) return 1;
+            return b.rssi.compareTo(a.rssi);
+          });
+
+        _discoveredDevices = list;
+        if (!_discoveredController.isClosed) {
+          _discoveredController.add(list);
+        }
+      }
+    });
+
+    // Listen to live over-the-air BLE advertisement broadcasts
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      final now = DateTime.now();
       for (final r in results) {
+        // Only accept devices actively emitting broadcast signals
+        if (r.rssi < -95) continue;
+
         final rawName = r.device.platformName.isNotEmpty
             ? r.device.platformName
             : r.advertisementData.advName;
@@ -156,14 +199,16 @@ class RealBleManager implements BleManager {
           displayName = 'BLE Device ($idShort)';
         }
 
-        seen[r.device.remoteId.str] = DiscoveredDevice(
-          id: r.device.remoteId.str,
+        final deviceId = r.device.remoteId.str;
+        seen[deviceId] = DiscoveredDevice(
+          id: deviceId,
           name: displayName,
           rssi: r.rssi,
         );
+        lastSeen[deviceId] = now;
       }
 
-      // Sort matching/starred devices to the top
+      // Sort matching/starred devices to the top by signal strength
       final list = seen.values.toList()
         ..sort((a, b) {
           final aMatch = a.name.startsWith('⭐');
@@ -188,6 +233,8 @@ class RealBleManager implements BleManager {
 
   @override
   Future<void> stopScan() async {
+    _scanPruneTimer?.cancel();
+    _scanPruneTimer = null;
     await FlutterBluePlus.stopScan();
     await _scanSub?.cancel();
     _scanSub = null;

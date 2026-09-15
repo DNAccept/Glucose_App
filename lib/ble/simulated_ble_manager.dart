@@ -82,10 +82,17 @@ class SimulatedBleManager implements BleManager {
   Future<void> startScan() async {
     _connectionState = BleConnectionState.scanning;
     _connectionStateController.add(_connectionState);
-    _discoveredList = [
-      const DiscoveredDevice(id: 'SIM-WEARABLE-001', name: 'Simulated Glucose Wearable', rssi: -55),
-      const DiscoveredDevice(id: 'SIM-WEARABLE-002', name: 'Test Wearable B', rssi: -72),
-    ];
+    if (_isPlaying && _activeScenario != null) {
+      _discoveredList = [
+        DiscoveredDevice(
+          id: 'SIM-WEARABLE-${_activeScenario!.id}',
+          name: '⭐ Simulated ${_activeScenario!.title}',
+          rssi: -55,
+        ),
+      ];
+    } else {
+      _discoveredList = [];
+    }
     _discoveredDevicesController.add(_discoveredList);
   }
 
