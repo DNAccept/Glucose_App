@@ -140,8 +140,8 @@ class SimulatedBleManager implements BleManager {
     if (mode == SimulationPlaybackMode.instant) {
       while (_currentEventIndex < scenario.events.length && _isPlaying) {
         _executeNextEvent();
+        await Future.microtask(() {});
       }
-      stopScenario();
     } else if (mode == SimulationPlaybackMode.timed) {
       _scheduleNextEvent();
     }
