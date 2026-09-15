@@ -402,6 +402,97 @@ class OnlineDatabaseService {
     return _usersById[remoteId];
   }
 
+  Future<RemoteUser> updateUser({
+    required int userId,
+    String? newUsername,
+    String? newPasswordHash,
+    String? newPasswordSalt,
+  }) async {
+    _checkOnline();
+
+    if (serverUrl != null && serverUrl!.isNotEmpty) {
+      try {
+        final res = await _client.post(
+          Uri.parse('$serverUrl/api/user/update'),
+          headers: _authHeaders(),
+          body: jsonEncode({
+            'userId': userId,
+            if (newUsername != null) 'newUsername': newUsername,
+            if (newPasswordHash != null) 'newPasswordHash': newPasswordHash,
+            if (newPasswordSalt != null) 'newPasswordSalt': newPasswordSalt,
+          }),
+        ).timeout(const Duration(seconds: 5));
+
+        if (res.statusCode == 200) {
+          return RemoteUser.fromJson(jsonDecode(res.body));
+        } else {
+          final body = jsonDecode(res.body);
+          throw OnlineDatabaseException(body['error'] ?? 'Failed to update user profile on cloud server.');
+        }
+      } catch (e) {
+        if (e is OnlineDatabaseException) rethrow;
+        throw OnlineDatabaseException('Server error: ${e.toString()}');
+      }
+    }
+
+    // In-memory fallback
+    final user = _usersById[userId];
+    if (user == null) {
+      throw OnlineDatabaseException('User not found on cloud server.');
+    }
+
+    String updatedUsername = user.username;
+    if (newUsername != null && newUsername.trim().isNotEmpty) {
+      final normalized = newUsername.trim().toLowerCase();
+      if (_usersByUsername.containsKey(normalized) && _usersByUsername[normalized]!.id != userId) {
+        throw OnlineDatabaseException('Username is already taken by another account.');
+      }
+      _usersByUsername.remove(user.username.toLowerCase());
+      updatedUsername = newUsername.trim();
+    }
+
+    final updatedUser = RemoteUser(
+      id: user.id,
+      username: updatedUsername,
+      passwordHash: newPasswordHash ?? user.passwordHash,
+      passwordSalt: newPasswordSalt ?? user.passwordSalt,
+      createdAt: user.createdAt,
+      token: user.token,
+    );
+
+    _usersById[userId] = updatedUser;
+    _usersByUsername[updatedUsername.toLowerCase()] = updatedUser;
+    return updatedUser;
+  }
+
+  Future<void> deleteUser(int userId) async {
+    _checkOnline();
+
+    if (serverUrl != null && serverUrl!.isNotEmpty) {
+      try {
+        final res = await _client.post(
+          Uri.parse('$serverUrl/api/user/delete'),
+          headers: _authHeaders(),
+          body: jsonEncode({'userId': userId}),
+        ).timeout(const Duration(seconds: 5));
+
+        if (res.statusCode != 200) {
+          final body = jsonDecode(res.body);
+          throw OnlineDatabaseException(body['error'] ?? 'Failed to delete user account on cloud server.');
+        }
+      } catch (e) {
+        if (e is OnlineDatabaseException) rethrow;
+        throw OnlineDatabaseException('Server error: ${e.toString()}');
+      }
+    }
+
+    // In-memory fallback
+    final user = _usersById.remove(userId);
+    if (user != null) {
+      _usersByUsername.remove(user.username.toLowerCase());
+    }
+  }
+
   Future<List<RemoteReading>> pushReadings(int userId, List<RemoteReading> items) async {
     _checkOnline();
     if (serverUrl != null && serverUrl!.isNotEmpty) {

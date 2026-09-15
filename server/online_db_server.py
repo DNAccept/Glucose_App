@@ -367,6 +367,56 @@ class OnlineDatabaseRequestHandler(BaseHTTPRequestHandler):
                     "token": token
                 })
 
+            elif path == "/api/user/update":
+                user_id = body.get("userId")
+                if not user_id:
+                    return self._send_error("Missing userId in request body")
+
+                if not self._authenticate_request(cursor, expected_user_id=user_id):
+                    return
+
+                new_username = body.get("newUsername", "").strip() if body.get("newUsername") else None
+                new_hash = body.get("newPasswordHash")
+                new_salt = body.get("newPasswordSalt")
+
+                if new_username:
+                    cursor.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?", (new_username, user_id))
+                    if cursor.fetchone():
+                        return self._send_error("Username is already taken by another account.")
+                    cursor.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user_id))
+
+                if new_hash and new_salt:
+                    cursor.execute("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?", (new_hash, new_salt, user_id))
+
+                conn.commit()
+
+                cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+                row = cursor.fetchone()
+                self._send_json({
+                    "id": row["id"],
+                    "username": row["username"],
+                    "passwordHash": row["password_hash"],
+                    "passwordSalt": row["password_salt"],
+                    "createdAt": row["created_at"]
+                })
+
+            elif path == "/api/user/delete":
+                user_id = body.get("userId")
+                if not user_id:
+                    return self._send_error("Missing userId in request body")
+
+                if not self._authenticate_request(cursor, expected_user_id=user_id):
+                    return
+
+                cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM readings WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM reference_readings WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM user_settings WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                conn.commit()
+
+                self._send_json({"success": True, "message": "User account and associated data deleted."})
+
             elif path == "/api/readings/push":
                 user_id = body.get("userId")
                 if not user_id:

@@ -29,19 +29,49 @@ class SettingsScreen extends ConsumerWidget {
         const SizedBox(height: 12),
         const _SectionLabel('Account'),
         Card(
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-            leading: const CircleAvatar(
-              backgroundColor: AppColors.accentSoft,
-              foregroundColor: AppColors.accent,
-              child: Icon(Icons.person_outline),
-            ),
-            title: Text(currentUser?.username ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: const Text('Signed in on this device'),
-            trailing: TextButton(
-              onPressed: () => ref.read(authControllerProvider.notifier).logout(),
-              child: const Text('Log out'),
-            ),
+          child: Column(
+            children: [
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: const CircleAvatar(
+                  backgroundColor: AppColors.accentSoft,
+                  foregroundColor: AppColors.accent,
+                  child: Icon(Icons.person_outline),
+                ),
+                title: Text(currentUser?.username ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                subtitle: const Text('Signed in on this device'),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const Icon(Icons.edit_outlined, size: 20),
+                title: const Text('Edit Username'),
+                trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+                onTap: () => _showEditUsernameDialog(context, ref, currentUser?.username),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const Icon(Icons.lock_outline, size: 20),
+                title: const Text('Change Password'),
+                trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+                onTap: () => _showChangePasswordDialog(context, ref),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const Icon(Icons.logout_rounded, size: 20, color: Colors.orange),
+                title: const Text('Log out', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w600)),
+                onTap: () => ref.read(authControllerProvider.notifier).logout(),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const Icon(Icons.delete_forever_outlined, size: 20, color: Colors.red),
+                title: const Text('Delete Account', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                onTap: () => _showDeleteAccountDialog(context, ref),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 14),
@@ -287,6 +317,251 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showEditUsernameDialog(BuildContext context, WidgetRef ref, String? currentUsername) {
+    final controller = TextEditingController(text: currentUsername);
+    String? errorText;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          return AlertDialog(
+            title: const Text('Edit Username'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    labelText: 'New Username',
+                    errorText: errorText,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final newName = controller.text.trim();
+                  if (newName.length < 3) {
+                    setState(() => errorText = 'Username must be at least 3 characters.');
+                    return;
+                  }
+                  try {
+                    await ref.read(authControllerProvider.notifier).updateUsername(newName);
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Username updated successfully.')),
+                      );
+                    }
+                  } catch (e) {
+                    setState(() => errorText = e.toString().replaceFirst('Exception: ', ''));
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showChangePasswordDialog(BuildContext context, WidgetRef ref) {
+    final currentPassCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    final confirmPassCtrl = TextEditingController();
+    String? errorText;
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          return AlertDialog(
+            title: const Text('Change Password'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: currentPassCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Current Password',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: newPassCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'New Password',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: confirmPassCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Confirm New Password',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      errorText!,
+                      style: const TextStyle(color: Colors.red, fontSize: 12.5),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        final currentPass = currentPassCtrl.text;
+                        final newPass = newPassCtrl.text;
+                        final confirmPass = confirmPassCtrl.text;
+
+                        if (currentPass.isEmpty) {
+                          setState(() => errorText = 'Please enter your current password.');
+                          return;
+                        }
+                        if (newPass.length < 6) {
+                          setState(() => errorText = 'New password must be at least 6 characters.');
+                          return;
+                        }
+                        if (newPass != confirmPass) {
+                          setState(() => errorText = 'New passwords do not match.');
+                          return;
+                        }
+
+                        setState(() {
+                          isSubmitting = true;
+                          errorText = null;
+                        });
+
+                        try {
+                          await ref.read(authControllerProvider.notifier).updatePassword(currentPass, newPass);
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Password updated successfully.')),
+                            );
+                          }
+                        } catch (e) {
+                          setState(() {
+                            isSubmitting = false;
+                            errorText = e.toString().replaceFirst('Exception: ', '');
+                          });
+                        }
+                      },
+                child: isSubmitting
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Update Password'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
+    final passwordCtrl = TextEditingController();
+    String? errorText;
+    bool isDeleting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          return AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.warning_amber_rounded, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Delete Account?'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This action cannot be undone. All your stored glucose readings, calibration logs, and cloud backups will be permanently deleted.',
+                  style: TextStyle(fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm Password to Delete',
+                    errorText: errorText,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isDeleting ? null : () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: isDeleting
+                    ? null
+                    : () async {
+                        final pass = passwordCtrl.text;
+                        if (pass.isEmpty) {
+                          setState(() => errorText = 'Please enter your password.');
+                          return;
+                        }
+
+                        setState(() {
+                          isDeleting = true;
+                          errorText = null;
+                        });
+
+                        try {
+                          await ref.read(authControllerProvider.notifier).deleteAccount(pass);
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        } catch (e) {
+                          setState(() {
+                            isDeleting = false;
+                            errorText = e.toString().replaceFirst('Exception: ', '');
+                          });
+                        }
+                      },
+                child: isDeleting
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Delete Account'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

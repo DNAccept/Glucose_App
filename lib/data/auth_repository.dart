@@ -133,6 +133,110 @@ class AuthRepository {
     return AppUser(id: row.id, username: row.username);
   }
 
+  Future<AppUser> updateUsername(int userId, String newUsername) async {
+    final normalized = newUsername.trim();
+    if (normalized.length < 3) {
+      throw AuthException('Username must be at least 3 characters.');
+    }
+
+    final localRow = await (_db.select(_db.users)..where((t) => t.id.equals(userId))).getSingleOrNull();
+    if (localRow == null) {
+      throw AuthException('User account not found.');
+    }
+
+    final existing = await (_db.select(_db.users)..where((t) => t.username.equals(normalized) & t.id.equals(userId).not())).getSingleOrNull();
+    if (existing != null) {
+      throw AuthException('That username is already taken.');
+    }
+
+    final onlineDb = _onlineDb;
+    if (onlineDb != null && onlineDb.isOnline && localRow.remoteId != null) {
+      try {
+        await onlineDb.updateUser(
+          userId: localRow.remoteId!,
+          newUsername: normalized,
+        );
+      } on OnlineDatabaseException catch (e) {
+        throw AuthException(e.message);
+      }
+    }
+
+    await (_db.update(_db.users)..where((t) => t.id.equals(userId))).write(
+      UsersCompanion(
+        username: Value(normalized),
+        lastSyncedAt: Value(DateTime.now()),
+      ),
+    );
+
+    return AppUser(id: userId, username: normalized);
+  }
+
+  Future<void> updatePassword(int userId, String currentPassword, String newPassword) async {
+    if (newPassword.length < 6) {
+      throw AuthException('New password must be at least 6 characters.');
+    }
+
+    final localRow = await (_db.select(_db.users)..where((t) => t.id.equals(userId))).getSingleOrNull();
+    if (localRow == null) {
+      throw AuthException('User account not found.');
+    }
+
+    final currentHash = _hash(currentPassword, localRow.passwordSalt);
+    if (currentHash != localRow.passwordHash) {
+      throw AuthException('Current password is incorrect.');
+    }
+
+    final newSalt = _generateSalt();
+    final newHash = _hash(newPassword, newSalt);
+
+    final onlineDb = _onlineDb;
+    if (onlineDb != null && onlineDb.isOnline && localRow.remoteId != null) {
+      try {
+        await onlineDb.updateUser(
+          userId: localRow.remoteId!,
+          newPasswordHash: newHash,
+          newPasswordSalt: newSalt,
+        );
+      } on OnlineDatabaseException catch (e) {
+        throw AuthException(e.message);
+      }
+    }
+
+    await (_db.update(_db.users)..where((t) => t.id.equals(userId))).write(
+      UsersCompanion(
+        passwordHash: Value(newHash),
+        passwordSalt: Value(newSalt),
+        lastSyncedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<void> deleteAccount(int userId, String currentPassword) async {
+    final localRow = await (_db.select(_db.users)..where((t) => t.id.equals(userId))).getSingleOrNull();
+    if (localRow == null) {
+      throw AuthException('User account not found.');
+    }
+
+    final currentHash = _hash(currentPassword, localRow.passwordSalt);
+    if (currentHash != localRow.passwordHash) {
+      throw AuthException('Incorrect password.');
+    }
+
+    final onlineDb = _onlineDb;
+    if (onlineDb != null && onlineDb.isOnline && localRow.remoteId != null) {
+      try {
+        await onlineDb.deleteUser(localRow.remoteId!);
+      } on OnlineDatabaseException catch (_) {
+        // Continue with local deletion
+      }
+    }
+
+    await (_db.delete(_db.readings)..where((t) => t.userId.equals(userId))).go();
+    await (_db.delete(_db.referenceReadings)..where((t) => t.userId.equals(userId))).go();
+    await (_db.delete(_db.userSettings)..where((t) => t.userId.equals(userId))).go();
+    await (_db.delete(_db.users)..where((t) => t.id.equals(userId))).go();
+  }
+
   static String _generateSalt() {
     final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
     return base64UrlEncode(bytes);

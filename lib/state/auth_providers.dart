@@ -60,6 +60,34 @@ class AuthController extends AsyncNotifier<AppUser?> {
     ref.read(onlineDatabaseServiceProvider).authToken = null;
     state = const AsyncData(null);
   }
+
+  Future<void> updateUsername(String newUsername) async {
+    final currentUser = state.valueOrNull;
+    if (currentUser == null) return;
+
+    state = const AsyncLoading<AppUser?>().copyWithPrevious(state);
+    state = await AsyncValue.guard(() async {
+      final updatedUser = await ref.read(authRepositoryProvider).updateUsername(currentUser.id, newUsername);
+      return updatedUser;
+    });
+  }
+
+  Future<void> updatePassword(String currentPassword, String newPassword) async {
+    final currentUser = state.valueOrNull;
+    if (currentUser == null) return;
+
+    final repo = ref.read(authRepositoryProvider);
+    await repo.updatePassword(currentUser.id, currentPassword, newPassword);
+  }
+
+  Future<void> deleteAccount(String currentPassword) async {
+    final currentUser = state.valueOrNull;
+    if (currentUser == null) return;
+
+    final repo = ref.read(authRepositoryProvider);
+    await repo.deleteAccount(currentUser.id, currentPassword);
+    await logout();
+  }
 }
 
 final authControllerProvider = AsyncNotifierProvider<AuthController, AppUser?>(AuthController.new);
