@@ -76,70 +76,7 @@ class SettingsScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 14),
         const _SectionLabel('Alerts & Clinical Thresholds'),
-        Card(
-          child: Column(
-            children: [
-              SwitchListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                title: const Text('High / low alerts'),
-                subtitle: const Text('Notify me when the device reports a hypo or hyper state'),
-                value: alertsEnabled,
-                activeTrackColor: AppColors.accent,
-                onChanged: (v) => ref.read(alertsEnabledProvider.notifier).set(v),
-              ),
-              if (alertsEnabled) ...[
-                const Divider(height: 1),
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  title: const Text('Low Alert Threshold'),
-                  subtitle: const Text('Triggers low alert notification'),
-                  trailing: DropdownButton<int>(
-                    value: ref.watch(lowThresholdProvider),
-                    underline: const SizedBox(),
-                    items: [60, 70, 80, 90].map((v) => DropdownMenuItem(value: v, child: Text('$v mg/dL'))).toList(),
-                    onChanged: (val) => val != null ? ref.read(lowThresholdProvider.notifier).set(val) : null,
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  title: const Text('High Alert Threshold'),
-                  subtitle: const Text('Triggers high alert notification'),
-                  trailing: DropdownButton<int>(
-                    value: ref.watch(highThresholdProvider),
-                    underline: const SizedBox(),
-                    items: [160, 180, 200, 240].map((v) => DropdownMenuItem(value: v, child: Text('$v mg/dL'))).toList(),
-                    onChanged: (val) => val != null ? ref.read(highThresholdProvider.notifier).set(val) : null,
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  title: const Text('Urgent Low Alarm Threshold'),
-                  subtitle: const Text('Max priority emergency alarm override'),
-                  trailing: DropdownButton<int>(
-                    value: ref.watch(urgentLowThresholdProvider),
-                    underline: const SizedBox(),
-                    items: [50, 55, 60, 65].map((v) => DropdownMenuItem(value: v, child: Text('$v mg/dL'))).toList(),
-                    onChanged: (val) => val != null ? ref.read(urgentLowThresholdProvider.notifier).set(val) : null,
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  title: const Text('Default Snooze Duration'),
-                  subtitle: const Text('Suppresses repeated alerts after snooze'),
-                  trailing: DropdownButton<int>(
-                    value: ref.watch(defaultSnoozeDurationProvider),
-                    underline: const SizedBox(),
-                    items: [15, 30, 45, 60].map((v) => DropdownMenuItem(value: v, child: Text('$v mins'))).toList(),
-                    onChanged: (val) => val != null ? ref.read(defaultSnoozeDurationProvider.notifier).set(val) : null,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
+        const _AlertsCard(),
         const SizedBox(height: 14),
         const _SectionLabel('Cloud Backup & Synchronization'),
         Card(
@@ -576,6 +513,280 @@ class _SectionLabel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(left: 6, bottom: 8),
       child: Text(text, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
+    );
+  }
+}
+
+class _AlertsCard extends ConsumerStatefulWidget {
+  const _AlertsCard();
+
+  @override
+  ConsumerState<_AlertsCard> createState() => _AlertsCardState();
+}
+
+class _AlertsCardState extends ConsumerState<_AlertsCard> {
+  bool _showMore = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final alertsEnabled = ref.watch(alertsEnabledProvider);
+    final lowThreshold = ref.watch(lowThresholdProvider);
+    final highThreshold = ref.watch(highThresholdProvider);
+    final urgentLowThreshold = ref.watch(urgentLowThresholdProvider);
+    final snoozeDuration = ref.watch(defaultSnoozeDurationProvider);
+
+    return Card(
+      child: Column(
+        children: [
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            title: const Text('High / low alerts'),
+            subtitle: const Text('Notify me when the device reports a hypo or hyper state'),
+            value: alertsEnabled,
+            activeTrackColor: AppColors.accent,
+            onChanged: (v) {
+              ref.read(alertsEnabledProvider.notifier).set(v);
+              if (!v && _showMore) {
+                setState(() => _showMore = false);
+              }
+            },
+          ),
+          if (alertsEnabled) ...[
+            const Divider(height: 1),
+            InkWell(
+              onTap: () => setState(() => _showMore = !_showMore),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _showMore ? 'Show less' : 'Show more',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.accent,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _showMore ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                      color: AppColors.accent,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_showMore) ...[
+              const Divider(height: 1),
+              _ScrollableThresholdTile(
+                title: 'Low Alert Threshold',
+                subtitle: 'Triggers low alert notification',
+                unit: 'mg/dL',
+                value: lowThreshold,
+                min: 60,
+                max: 95,
+                step: 5,
+                onChanged: (val) => ref.read(lowThresholdProvider.notifier).set(val),
+              ),
+              const Divider(height: 1),
+              _ScrollableThresholdTile(
+                title: 'High Alert Threshold',
+                subtitle: 'Triggers high alert notification',
+                unit: 'mg/dL',
+                value: highThreshold,
+                min: 140,
+                max: 260,
+                step: 10,
+                onChanged: (val) => ref.read(highThresholdProvider.notifier).set(val),
+              ),
+              const Divider(height: 1),
+              _ScrollableThresholdTile(
+                title: 'Urgent Low Alarm Threshold',
+                subtitle: 'Max priority emergency alarm override',
+                unit: 'mg/dL',
+                value: urgentLowThreshold,
+                min: 50,
+                max: 75,
+                step: 5,
+                onChanged: (val) => ref.read(urgentLowThresholdProvider.notifier).set(val),
+              ),
+              const Divider(height: 1),
+              _ScrollableThresholdTile(
+                title: 'Default Snooze Duration',
+                subtitle: 'Suppresses repeated alerts after snooze',
+                unit: 'mins',
+                value: snoozeDuration,
+                min: 10,
+                max: 60,
+                step: 5,
+                onChanged: (val) => ref.read(defaultSnoozeDurationProvider.notifier).set(val),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ScrollableThresholdTile extends StatefulWidget {
+  const _ScrollableThresholdTile({
+    required this.title,
+    required this.subtitle,
+    required this.unit,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String subtitle;
+  final String unit;
+  final int value;
+  final int min;
+  final int max;
+  final int step;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_ScrollableThresholdTile> createState() => _ScrollableThresholdTileState();
+}
+
+class _ScrollableThresholdTileState extends State<_ScrollableThresholdTile> {
+  late final ScrollController _scrollController;
+
+  List<int> get _range {
+    final list = <int>[];
+    for (int v = widget.min; v <= widget.max; v += widget.step) {
+      list.add(v);
+    }
+    if (!list.contains(widget.value)) {
+      list.add(widget.value);
+      list.sort();
+    }
+    return list;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+  }
+
+  @override
+  void didUpdateWidget(covariant _ScrollableThresholdTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _scrollToSelected();
+    }
+  }
+
+  void _scrollToSelected() {
+    if (!_scrollController.hasClients) return;
+    final index = _range.indexOf(widget.value);
+    if (index != -1) {
+      const itemWidth = 64.0;
+      final targetOffset = (index * itemWidth) - 100;
+      _scrollController.animateTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rangeValues = _range;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(widget.subtitle, style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accentSoft,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  '${widget.value} ${widget.unit}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 38,
+            child: ListView.builder(
+              controller: _scrollController,
+              scrollDirection: Axis.horizontal,
+              itemCount: rangeValues.length,
+              itemBuilder: (context, index) {
+                final val = rangeValues[index];
+                final isSelected = val == widget.value;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(
+                      '$val',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    selected: isSelected,
+                    selectedColor: AppColors.accent,
+                    backgroundColor: Colors.grey.shade100,
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(
+                      color: isSelected ? AppColors.accent : Colors.grey.shade300,
+                    ),
+                    onSelected: (selected) {
+                      if (selected) {
+                        widget.onChanged(val);
+                      }
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
