@@ -29,6 +29,7 @@ class RealBleManager implements BleManager {
   DateTime? _lastPacketAt;
   BluetoothCharacteristic? _activeReadingChar;
   List<DiscoveredDevice> _discoveredDevices = [];
+  DateTime? _scanStartedAt;
 
   StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
   StreamSubscription<List<ScanResult>>? _scanSub;
@@ -160,6 +161,7 @@ class RealBleManager implements BleManager {
       return;
     }
 
+    _scanStartedAt = DateTime.now();
     _setConnectionState(BleConnectionState.scanning);
     _discoveredDevices = [];
     if (!_discoveredController.isClosed) {
@@ -177,10 +179,20 @@ class RealBleManager implements BleManager {
     final seen = <String, DiscoveredDevice>{};
     final lastSeen = <String, DateTime>{};
 
-    _isScanningSub = FlutterBluePlus.isScanning.listen((isScanning) {
+    _isScanningSub = FlutterBluePlus.isScanning.listen((isScanning) async {
       if (!isScanning && _device == null && _currentDevice == null) {
-        _setConnectionState(BleConnectionState.disconnected);
-        _scanPruneTimer?.cancel();
+        final started = _scanStartedAt;
+        if (started != null) {
+          final elapsed = DateTime.now().difference(started);
+          const minScanDuration = Duration(seconds: 3);
+          if (elapsed < minScanDuration) {
+            await Future.delayed(minScanDuration - elapsed);
+          }
+        }
+        if (_connectionState == BleConnectionState.scanning) {
+          _setConnectionState(BleConnectionState.disconnected);
+          _scanPruneTimer?.cancel();
+        }
       }
     });
 
@@ -309,6 +321,7 @@ class RealBleManager implements BleManager {
 
   @override
   Future<void> stopScan() async {
+    _scanStartedAt = null;
     _stopScanningAndClearDiscovered();
     if (_device == null) {
       _setConnectionState(BleConnectionState.disconnected);
