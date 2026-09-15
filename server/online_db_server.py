@@ -7,6 +7,8 @@ import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
+import time
+
 DB_FILE = os.environ.get("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "online_database.sqlite"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*")
 
@@ -14,75 +16,93 @@ def get_db_connection():
     db_dir = os.path.dirname(os.path.abspath(DB_FILE))
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
-    conn = sqlite3.connect(DB_FILE, timeout=10.0)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    conn.execute("PRAGMA foreign_keys=ON;")
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout=10000;")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("PRAGMA foreign_keys=ON;")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
+_db_initialized = False
+
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    global _db_initialized
+    if _db_initialized:
+        return
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            password_salt TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-    """)
+    for attempt in range(5):
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS readings (
-            uuid TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            timestamp TEXT NOT NULL,
-            mg_dl REAL NOT NULL,
-            glucose_class INTEGER NOT NULL,
-            confidence INTEGER NOT NULL,
-            last_modified TEXT NOT NULL,
-            is_deleted INTEGER DEFAULT 0
-        );
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                );
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS reference_readings (
-            uuid TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            reference_value_mg_dl INTEGER NOT NULL,
-            reference_class INTEGER NOT NULL,
-            device_mg_dl REAL,
-            device_class INTEGER,
-            device_confidence INTEGER,
-            timestamp TEXT NOT NULL,
-            last_modified TEXT NOT NULL,
-            is_deleted INTEGER DEFAULT 0
-        );
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS readings (
+                    uuid TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    mg_dl REAL NOT NULL,
+                    glucose_class INTEGER NOT NULL,
+                    confidence INTEGER NOT NULL,
+                    last_modified TEXT NOT NULL,
+                    is_deleted INTEGER DEFAULT 0
+                );
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_settings (
-            user_id INTEGER PRIMARY KEY,
-            alerts_enabled INTEGER NOT NULL,
-            cloud_sync_enabled INTEGER NOT NULL,
-            last_modified TEXT NOT NULL
-        );
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reference_readings (
+                    uuid TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    reference_value_mg_dl INTEGER NOT NULL,
+                    reference_class INTEGER NOT NULL,
+                    device_mg_dl REAL,
+                    device_class INTEGER,
+                    device_confidence INTEGER,
+                    timestamp TEXT NOT NULL,
+                    last_modified TEXT NOT NULL,
+                    is_deleted INTEGER DEFAULT 0
+                );
+            """)
 
-    conn.commit()
-    conn.close()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    alerts_enabled INTEGER NOT NULL,
+                    cloud_sync_enabled INTEGER NOT NULL,
+                    last_modified TEXT NOT NULL
+                );
+            """)
+
+            conn.commit()
+            conn.close()
+            _db_initialized = True
+            break
+        except sqlite3.OperationalError:
+            time.sleep(0.5)
 
 def create_session(cursor, user_id):
     token = secrets.token_hex(32)
