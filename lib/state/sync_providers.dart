@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/config.dart';
 import '../data/online_database_service.dart';
 import '../data/sync_service.dart';
 import 'auth_providers.dart';
@@ -12,7 +13,7 @@ final onlineDatabaseServiceProvider = Provider<OnlineDatabaseService>((ref) {
   final savedUrl = settings.serverUrl;
   final savedToken = settings.authToken;
   final service = OnlineDatabaseService(
-    serverUrl: (savedUrl != null && savedUrl.isNotEmpty) ? savedUrl : 'http://127.0.0.1:8080',
+    serverUrl: (savedUrl != null && savedUrl.isNotEmpty) ? savedUrl : AppConfig.defaultServerUrl,
     authToken: savedToken,
   );
   ref.onDispose(service.dispose);

@@ -29,7 +29,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     final onlineDb = ref.read(onlineDatabaseServiceProvider);
-    _serverUrlController = TextEditingController(text: onlineDb.serverUrl ?? 'http://10.12.64.7:8080');
+    _serverUrlController = TextEditingController(text: onlineDb.serverUrl ?? AppConfig.defaultServerUrl);
   }
 
   @override
@@ -212,7 +212,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         controller: _serverUrlController,
                         decoration: InputDecoration(
                           labelText: 'Online Database Server URL',
-                          hintText: 'http://10.12.64.7:8080',
+                          hintText: AppConfig.renderServerUrl,
                           isDense: true,
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           suffixIcon: IconButton(

@@ -4,10 +4,13 @@ import 'package:flutter/foundation.dart';
 class AppConfig {
   AppConfig._();
 
+  /// Production Render cloud server URL default.
+  static const String renderServerUrl = 'https://glucose-backend-4zyc.onrender.com';
+
   /// Compile-time server URL passed via `--dart-define=SERVER_URL=https://your-hosted-domain.com`.
   static const String definedServerUrl = String.fromEnvironment(
     'SERVER_URL',
-    defaultValue: '',
+    defaultValue: renderServerUrl,
   );
 
   /// Production mode detection.
@@ -18,7 +21,7 @@ class AppConfig {
     if (definedServerUrl.isNotEmpty) {
       return definedServerUrl.trim();
     }
-    return 'http://127.0.0.1:8080';
+    return renderServerUrl;
   }
 
   /// List of candidate fallback server endpoints for automatic network resolution.
@@ -34,6 +37,7 @@ class AppConfig {
     }
 
     for (final fallback in [
+      renderServerUrl,
       'http://127.0.0.1:8080',
       'http://192.168.137.118:8080',
       'http://192.168.56.1:8080',
