@@ -233,7 +233,6 @@ class AuthRepository {
 
     await (_db.delete(_db.readings)..where((t) => t.userId.equals(userId))).go();
     await (_db.delete(_db.referenceReadings)..where((t) => t.userId.equals(userId))).go();
-    await (_db.delete(_db.userSettings)..where((t) => t.userId.equals(userId))).go();
     await (_db.delete(_db.users)..where((t) => t.id.equals(userId))).go();
   }
 
