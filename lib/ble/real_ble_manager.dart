@@ -180,7 +180,7 @@ class RealBleManager implements BleManager {
     final lastSeen = <String, DateTime>{};
 
     _isScanningSub = FlutterBluePlus.isScanning.listen((isScanning) async {
-      if (!isScanning && _device == null && _currentDevice == null) {
+      if (!isScanning && _device == null && _currentDevice == null && _connectionState == BleConnectionState.scanning) {
         final started = _scanStartedAt;
         if (started != null) {
           final elapsed = DateTime.now().difference(started);
@@ -189,7 +189,7 @@ class RealBleManager implements BleManager {
             await Future.delayed(minScanDuration - elapsed);
           }
         }
-        if (_connectionState == BleConnectionState.scanning) {
+        if (_scanStartedAt != null && _connectionState == BleConnectionState.scanning && _device == null && _currentDevice == null) {
           _setConnectionState(BleConnectionState.disconnected);
           _scanPruneTimer?.cancel();
         }
